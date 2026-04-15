@@ -23,6 +23,7 @@ target/
 .codex
 .gemini
 .opencode
+site/
 
 logs/
 workspaces/
