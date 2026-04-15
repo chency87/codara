@@ -1,0 +1,2043 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Unified Agent Gateway (UAG) - Bridge stateless API clients with stateful CLI agents">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/agentbridge/agentbridge/api-dashboard/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../architecture/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>API & Dashboard - AgentBridge</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#design-specification-api-layer-web-dashboard" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AgentBridge" class="md-header__button md-logo" aria-label="AgentBridge" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AgentBridge
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API & Dashboard
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/agentbridge/agentbridge" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  API & Dashboard
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../alignment-judgement/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Alignment Judgement
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AgentBridge" class="md-nav__button md-logo" aria-label="AgentBridge" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    AgentBridge
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/agentbridge/agentbridge" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & Dashboard
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unified-agent-gateway-uag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unified Agent Gateway (UAG)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-api-layer-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. API Layer Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. API Layer Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-base-url-versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Base URL &amp; Versioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-common-response-envelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Common Response Envelope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-endpoint-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Endpoint Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.4 Endpoint Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#system-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#account-pool-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Account Pool Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Rate Limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-web-dashboard-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Web Dashboard Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Web Dashboard Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-technology-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Technology Decision
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.3 Pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview (Home)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accounts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-log_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-live-update-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Live Update Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-error-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Error States
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-api-dashboard-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. API ↔ Dashboard Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-implementation-priorities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Implementation Priorities
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alignment-judgement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alignment Judgement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unified-agent-gateway-uag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unified Agent Gateway (UAG)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#0-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-api-layer-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. API Layer Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. API Layer Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-base-url-versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Base URL &amp; Versioning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-common-response-envelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Common Response Envelope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-endpoint-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Endpoint Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.4 Endpoint Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#system-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#account-pool-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Account Pool Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Rate Limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-web-dashboard-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Web Dashboard Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Web Dashboard Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-technology-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Technology Decision
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.3 Pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overview-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview (Home)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accounts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#audit-log_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-live-update-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Live Update Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-error-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Error States
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-api-dashboard-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. API ↔ Dashboard Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-implementation-priorities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Implementation Priorities
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="design-specification-api-layer-web-dashboard">Design Specification: API Layer &amp; Web Dashboard<a class="headerlink" href="#design-specification-api-layer-web-dashboard" title="Permanent link">&para;</a></h1>
+<h2 id="unified-agent-gateway-uag">Unified Agent Gateway (UAG)<a class="headerlink" href="#unified-agent-gateway-uag" title="Permanent link">&para;</a></h2>
+<p><strong>Version:</strong> 1.0<br />
+<strong>Status:</strong> Design Draft<br />
+<strong>Depends On:</strong> UAG SRDS v1.2<br />
+<strong>Audience:</strong> Internal engineers and operators</p>
+<hr />
+<h2 id="0-scope">0. Scope<a class="headerlink" href="#0-scope" title="Permanent link">&para;</a></h2>
+<p>This document covers two layers that sit above the UAG core runtime:</p>
+<ol>
+<li><strong>The API Layer</strong> — the full set of HTTP endpoints exposed by the Gateway, beyond the core <code>/v1/chat/completions</code> completion endpoint specified in SRDS §10. This includes management, observability, and control-plane APIs.</li>
+<li><strong>The Web Dashboard</strong> — an operator-facing UI for monitoring system health, managing accounts and sessions, and diagnosing failures.</li>
+</ol>
+<p>These two layers are designed together because the dashboard is a first-party consumer of the management API. Every panel in the dashboard maps to an explicit API endpoint; there are no dashboard-internal data sources.</p>
+<hr />
+<h2 id="1-design-principles">1. Design Principles<a class="headerlink" href="#1-design-principles" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Dashboard = API client.</strong> The dashboard has no privileged backend access. Every piece of data it displays is available via the management API, making the API independently useful for scripting and external tooling.</li>
+<li><strong>Read-heavy, write-sparse.</strong> The management API is primarily observability. Mutations (account addition, session termination) are rare and require explicit operator intent.</li>
+<li><strong>Ops first.</strong> The dashboard is designed for an operator diagnosing a problem at 2am, not for onboarding. Density and precision over visual polish.</li>
+<li><strong>Audit everything.</strong> All state-mutating API calls are logged to an immutable audit trail with actor identity, timestamp, and before/after state.</li>
+</ul>
+<hr />
+<h2 id="2-api-layer-design">2. API Layer Design<a class="headerlink" href="#2-api-layer-design" title="Permanent link">&para;</a></h2>
+<h3 id="21-base-url-versioning">2.1 Base URL &amp; Versioning<a class="headerlink" href="#21-base-url-versioning" title="Permanent link">&para;</a></h3>
+<p>All management endpoints are namespaced under <code>/management/v1/</code> to distinguish them from the inference-compatible <code>/v1/</code> namespace.</p>
+<div class="codehilite"><pre><span></span><code>/v1/chat/completions          ← inference API (SRDS §10)
+/management/v1/*              ← management API (this document)
+/dashboard/*                  ← static dashboard assets (served by Gateway)
+</code></pre></div>
+
+<p>Versioning is path-based. Breaking changes increment the version prefix. Both versions are served concurrently during transition periods (minimum 30 days).</p>
+<h3 id="22-authentication">2.2 Authentication<a class="headerlink" href="#22-authentication" title="Permanent link">&para;</a></h3>
+<p>All <code>/management/v1/</code> endpoints require a bearer token with an <code>operator</code> scope. This is distinct from the <code>user</code> scope used by inference API clients.</p>
+<div class="codehilite"><pre><span></span><code>Authorization: Bearer &lt;operator_token&gt;
+</code></pre></div>
+
+<p>Tokens are issued via <code>POST /management/v1/auth/token</code> with a service account credential. Token TTL is 8 hours. Refresh is supported via <code>POST /management/v1/auth/refresh</code>.</p>
+<p>The dashboard authenticates via the same mechanism. On first load, if no valid token is present in <code>sessionStorage</code>, the dashboard redirects to a login page that exchanges credentials for a token.</p>
+<h3 id="23-common-response-envelope">2.3 Common Response Envelope<a class="headerlink" href="#23-common-response-envelope" title="Permanent link">&para;</a></h3>
+<p>All management API responses follow a consistent envelope:</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;data&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;meta&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;req_01J...&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-04-12T10:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;page&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;cursor&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;has_more&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Errors:</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;session_not_found&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;No session with id &#39;abc123&#39; exists.&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;req_01J...&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Pagination uses cursor-based pagination throughout. Offset pagination is not supported.</p>
+<h3 id="24-endpoint-reference">2.4 Endpoint Reference<a class="headerlink" href="#24-endpoint-reference" title="Permanent link">&para;</a></h3>
+<h4 id="system-health">System Health<a class="headerlink" href="#system-health" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/health</code></td>
+<td>Overall system health: gateway, orchestrator, state store</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/health/providers</code></td>
+<td>Per-provider reachability and latency</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/metrics</code></td>
+<td>Prometheus-compatible metrics scrape endpoint</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>GET /management/v1/health</code> response:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;data&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;degraded&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;components&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;gateway&quot;</span><span class="p">:</span><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w">      </span><span class="nt">&quot;latency_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;orchestrator&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w">      </span><span class="nt">&quot;latency_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;state_store&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w">      </span><span class="nt">&quot;latency_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;redis&quot;</span><span class="p">:</span><span class="w">        </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;degraded&quot;</span><span class="p">,</span><span class="nt">&quot;latency_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">420</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;high latency&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;checked_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-04-12T10:00:00Z&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Overall <code>status</code> is <code>"ok"</code> only if all components are <code>"ok"</code>. Otherwise <code>"degraded"</code> or <code>"down"</code>.</p>
+<hr />
+<h4 id="session-management">Session Management<a class="headerlink" href="#session-management" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/sessions</code></td>
+<td>List all sessions (paginated, filterable)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/sessions/:id</code></td>
+<td>Get session detail</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/management/v1/sessions/:id</code></td>
+<td>Terminate and evict a session</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/management/v1/sessions/:id/reset</code></td>
+<td>Reset session to clean state (clears dirty flag)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/sessions/:id/turns</code></td>
+<td>Get turn history for a session</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Query parameters for <code>GET /management/v1/sessions</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provider</code></td>
+<td><code>string</code></td>
+<td>Filter by provider: <code>codex</code>, <code>gemini</code>, <code>opencode</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>string</code></td>
+<td>Filter by status: <code>idle</code>, <code>active</code>, <code>dirty</code>, <code>expired</code></td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td><code>string</code></td>
+<td>Filter by <code>cwd_path</code> prefix</td>
+</tr>
+<tr>
+<td><code>after</code></td>
+<td><code>cursor</code></td>
+<td>Pagination cursor</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td><code>int</code></td>
+<td>Results per page (default 50, max 200)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4 id="account-pool-management">Account Pool Management<a class="headerlink" href="#account-pool-management" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/accounts</code></td>
+<td>List all accounts in the pool</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/accounts/:id</code></td>
+<td>Get account detail + current usage metrics</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/management/v1/accounts</code></td>
+<td>Register a new account credential</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/management/v1/accounts/:id</code></td>
+<td>Remove an account from the pool</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/management/v1/accounts/:id/cooldown</code></td>
+<td>Manually force an account into COOLDOWN</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/management/v1/accounts/:id/recover</code></td>
+<td>Manually release an account from COOLDOWN</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>POST /management/v1/accounts</code> request body:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;provider&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;codex&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auth_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;API_KEY&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;credential&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sk-...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;codex-prod-01&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Credentials are encrypted at rest using AES-256-GCM. The raw credential is never returned in any response after creation — only a masked form (e.g., <code>sk-...vX9q</code>).</p>
+<hr />
+<h4 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/usage</code></td>
+<td>Aggregated token/request usage across all accounts</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/usage/accounts/:id</code></td>
+<td>Per-account usage time series</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/usage/sessions/:id</code></td>
+<td>Per-session token consumption breakdown</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/events</code></td>
+<td>Live event stream (SSE) of system events</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/management/v1/audit</code></td>
+<td>Paginated audit log of all management mutations</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>GET /management/v1/events</code> (SSE):</strong></p>
+<p>The events stream is used by the dashboard for live updates. Each event has a <code>type</code> and <code>data</code> payload:</p>
+<div class="codehilite"><pre><span></span><code>event: session.status_changed
+data: {&quot;session_id&quot;:&quot;abc123&quot;,&quot;old_status&quot;:&quot;active&quot;,&quot;new_status&quot;:&quot;dirty&quot;,&quot;ts&quot;:&quot;2026-04-12T10:01:00Z&quot;}
+
+event: account.cooldown_entered
+data: {&quot;account_id&quot;:&quot;acct_01&quot;,&quot;provider&quot;:&quot;codex&quot;,&quot;reason&quot;:&quot;429&quot;,&quot;ts&quot;:&quot;2026-04-12T10:01:05Z&quot;}
+
+event: provider.health_changed
+data: {&quot;provider&quot;:&quot;gemini&quot;,&quot;old_status&quot;:&quot;ok&quot;,&quot;new_status&quot;:&quot;degraded&quot;,&quot;ts&quot;:&quot;2026-04-12T10:01:10Z&quot;}
+</code></pre></div>
+
+<p>Event types:</p>
+<table>
+<thead>
+<tr>
+<th>Event Type</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session.created</code></td>
+<td>New session registered</td>
+</tr>
+<tr>
+<td><code>session.status_changed</code></td>
+<td>Session status transitions</td>
+</tr>
+<tr>
+<td><code>session.terminated</code></td>
+<td>Session deleted by operator</td>
+</tr>
+<tr>
+<td><code>account.cooldown_entered</code></td>
+<td>Account received 429</td>
+</tr>
+<tr>
+<td><code>account.cooldown_exited</code></td>
+<td>Account cooldown expired</td>
+</tr>
+<tr>
+<td><code>account.registered</code></td>
+<td>New account added to pool</td>
+</tr>
+<tr>
+<td><code>provider.health_changed</code></td>
+<td>Provider reachability status change</td>
+</tr>
+<tr>
+<td><code>orchestrator.semaphore_full</code></td>
+<td>Global concurrency limit reached</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4 id="audit-log">Audit Log<a class="headerlink" href="#audit-log" title="Permanent link">&para;</a></h4>
+<p>All state-mutating management API calls produce an immutable audit entry. The audit log is append-only and cannot be modified or deleted via any API endpoint.</p>
+<p><strong><code>GET /management/v1/audit</code> response entry:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;audit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;aud_01J...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;actor&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;operator:svc-account-01&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;session.terminated&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;target_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;session&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;target_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;before&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dirty&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;after&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;terminated&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;req_01J...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-04-12T10:02:00Z&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h3 id="25-rate-limiting">2.5 Rate Limiting<a class="headerlink" href="#25-rate-limiting" title="Permanent link">&para;</a></h3>
+<p>Management API endpoints are rate-limited separately from the inference API. Default limits:</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint Class</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read endpoints (<code>GET</code>)</td>
+<td>600 req/min per token</td>
+</tr>
+<tr>
+<td>Write endpoints (<code>POST</code>, <code>DELETE</code>)</td>
+<td>60 req/min per token</td>
+</tr>
+<tr>
+<td>SSE stream (<code>/events</code>)</td>
+<td>5 concurrent connections per token</td>
+</tr>
+<tr>
+<td>Metrics scrape (<code>/metrics</code>)</td>
+<td>60 req/min (no auth required from internal network)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-web-dashboard-design">3. Web Dashboard Design<a class="headerlink" href="#3-web-dashboard-design" title="Permanent link">&para;</a></h2>
+<h3 id="31-technology-decision">3.1 Technology Decision<a class="headerlink" href="#31-technology-decision" title="Permanent link">&para;</a></h3>
+<p>The dashboard is a <strong>single-page application</strong>. Recommended stack:</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Recommendation</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Framework</td>
+<td><strong>React 19 + TypeScript</strong></td>
+<td>Largest operator tooling ecosystem; strong typing for API contract enforcement</td>
+</tr>
+<tr>
+<td>Build</td>
+<td><strong>Vite</strong></td>
+<td>Fast dev iteration; no config overhead</td>
+</tr>
+<tr>
+<td>Data fetching</td>
+<td><strong>TanStack Query v5</strong></td>
+<td>Stale-while-revalidate, polling, and SSE integration in one library</td>
+</tr>
+<tr>
+<td>Charts</td>
+<td><strong>Recharts</strong></td>
+<td>Composable, TypeScript-native, no canvas complexity</td>
+</tr>
+<tr>
+<td>Styling</td>
+<td><strong>Tailwind CSS</strong></td>
+<td>Utility-first, no runtime overhead, consistent density</td>
+</tr>
+<tr>
+<td>Tables</td>
+<td><strong>TanStack Table v8</strong></td>
+<td>Virtualized rows for large session lists; column-level filtering</td>
+</tr>
+</tbody>
+</table>
+<p>This is a recommendation, not a mandate. Vue 3 + Vite is an equivalent alternative. The key constraint is that the framework must support <strong>SSE-based live updates</strong> natively and handle <strong>large paginated tables</strong> without DOM thrashing.</p>
+<h3 id="32-layout">3.2 Layout<a class="headerlink" href="#32-layout" title="Permanent link">&para;</a></h3>
+<p>The dashboard uses a fixed left sidebar navigation with a main content area. No nested navigation deeper than two levels.</p>
+<div class="codehilite"><pre><span></span><code><span class="err">┌─────────────────────────────────────────────────────────────┐</span>
+<span class="err">│</span><span class="w">  </span><span class="n">UAG</span><span class="w"> </span><span class="n">Operator</span><span class="w"> </span><span class="n">Dashboard</span><span class="w">            </span><span class="p">[</span><span class="n">health</span><span class="w"> </span><span class="n">indicator</span><span class="p">]</span><span class="w"> </span><span class="p">[</span><span class="n">user</span><span class="p">]</span><span class="w"> </span><span class="err">│</span>
+<span class="err">├──────────────┬──────────────────────────────────────────────┤</span>
+<span class="err">│</span><span class="w">              </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Overview</span><span class="w">    </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Sessions</span><span class="w">    </span><span class="err">│</span><span class="w">         </span><span class="n">Main</span><span class="w"> </span><span class="n">Content</span><span class="w"> </span><span class="n">Area</span><span class="w">                    </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Accounts</span><span class="w">    </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Providers</span><span class="w">   </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Usage</span><span class="w">       </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">  </span><span class="n">Audit</span><span class="w"> </span><span class="n">Log</span><span class="w">   </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">│</span><span class="w">              </span><span class="err">│</span><span class="w">                                              </span><span class="err">│</span>
+<span class="err">└──────────────┴──────────────────────────────────────────────┘</span>
+</code></pre></div>
+
+<p>A persistent <strong>system health badge</strong> in the top bar shows <code>OK / DEGRADED / DOWN</code> at a glance, driven by the SSE events stream. Clicking it navigates to the Overview page.</p>
+<h3 id="33-pages">3.3 Pages<a class="headerlink" href="#33-pages" title="Permanent link">&para;</a></h3>
+<h4 id="overview-home">Overview (Home)<a class="headerlink" href="#overview-home" title="Permanent link">&para;</a></h4>
+<p>The landing page. Purpose: answer "is anything on fire right now?" in under 5 seconds.</p>
+<p><strong>Panels:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Panel</th>
+<th>Data Source</th>
+<th>Refresh</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System health breakdown (component grid)</td>
+<td><code>GET /health</code></td>
+<td>SSE <code>provider.health_changed</code> + 30s poll</td>
+</tr>
+<tr>
+<td>Active sessions count</td>
+<td><code>GET /sessions?status=active</code></td>
+<td>SSE <code>session.status_changed</code></td>
+</tr>
+<tr>
+<td>Dirty sessions count (requires attention)</td>
+<td><code>GET /sessions?status=dirty</code></td>
+<td>SSE live</td>
+</tr>
+<tr>
+<td>Accounts in cooldown</td>
+<td><code>GET /accounts</code> filtered</td>
+<td>SSE <code>account.cooldown_*</code></td>
+</tr>
+<tr>
+<td>Semaphore utilization gauge (active / max)</td>
+<td><code>GET /metrics</code></td>
+<td>10s poll</td>
+</tr>
+<tr>
+<td>Recent events feed (last 20)</td>
+<td>SSE <code>/events</code></td>
+<td>Live</td>
+</tr>
+</tbody>
+</table>
+<p>The dirty sessions count and accounts-in-cooldown counts link directly to the filtered view of their respective pages.</p>
+<hr />
+<h4 id="sessions">Sessions<a class="headerlink" href="#sessions" title="Permanent link">&para;</a></h4>
+<p>A dense, filterable table of all sessions. Designed for fast triage.</p>
+<p><strong>Table columns:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Source Field</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Session ID</td>
+<td><code>client_session_id</code></td>
+<td>Truncated, click to copy full value</td>
+</tr>
+<tr>
+<td>Provider</td>
+<td><code>provider</code></td>
+<td>Colored badge</td>
+</tr>
+<tr>
+<td>Status</td>
+<td><code>status</code></td>
+<td><code>idle</code> / <code>active</code> / <code>dirty</code> / <code>expired</code> with color coding</td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td><code>cwd_path</code></td>
+<td>Truncated path, hover for full</td>
+</tr>
+<tr>
+<td>Last active</td>
+<td><code>updated_at</code></td>
+<td>Relative time ("3m ago")</td>
+</tr>
+<tr>
+<td>Token cache</td>
+<td><code>prefix_hash</code> match</td>
+<td>Hit / Miss badge from recent turn data</td>
+</tr>
+<tr>
+<td>Actions</td>
+<td>—</td>
+<td>Terminate, Reset</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Filters:</strong> Provider, Status, Workspace prefix (text search), Last active (time range).</p>
+<p><strong>Session Detail Drawer:</strong> Clicking a row opens a side drawer (not a new page) showing:</p>
+<ul>
+<li>Full session metadata</li>
+<li>Turn history table: turn index, input tokens, output tokens, finish reason, duration, timestamp</li>
+<li>Workspace diff viewer for the most recent turn (unified diff with syntax highlighting)</li>
+<li>Raw <code>backend_id</code> (for manual provider-side debugging)</li>
+<li>Audit log entries scoped to this session</li>
+</ul>
+<hr />
+<h4 id="accounts">Accounts<a class="headerlink" href="#accounts" title="Permanent link">&para;</a></h4>
+<p>Account pool management. Split into two tabs: <strong>Active</strong> and <strong>Cooldown</strong>.</p>
+<p><strong>Active tab columns:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Label</td>
+<td>Human-readable name set at registration</td>
+</tr>
+<tr>
+<td>Provider</td>
+<td>Colored badge</td>
+</tr>
+<tr>
+<td>Auth Type</td>
+<td><code>API_KEY</code> / <code>OAUTH_SESSION</code> / <code>SERVICE_ACCOUNT</code></td>
+</tr>
+<tr>
+<td>TPM Used / Limit</td>
+<td>Progress bar</td>
+</tr>
+<tr>
+<td>RPD Used / Limit</td>
+<td>Progress bar</td>
+</tr>
+<tr>
+<td>Sessions Bound</td>
+<td>Count of sessions currently using this account</td>
+</tr>
+<tr>
+<td>Actions</td>
+<td>Force cooldown, Remove</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Cooldown tab:</strong> Shows accounts currently in COOLDOWN with time remaining and reason (e.g., <code>"429 from provider"</code>). Each row has a <strong>Recover</strong> action for manual override.</p>
+<p><strong>Add Account modal:</strong> Form with fields for Provider, Auth Type, Credential (password input), and Label. Submits to <code>POST /management/v1/accounts</code>. On success, the new account appears in the table; the credential is never shown again.</p>
+<hr />
+<h4 id="providers">Providers<a class="headerlink" href="#providers" title="Permanent link">&para;</a></h4>
+<p>Health and latency view per provider. One card per provider (Codex, Gemini, OpenCode).</p>
+<p><strong>Per-provider card content:</strong></p>
+<ul>
+<li>Reachability status badge</li>
+<li>P50 / P95 adapter latency (last 5 minutes), sourced from <code>/metrics</code></li>
+<li>Active sessions count on this provider</li>
+<li>Accounts available / in cooldown on this provider</li>
+<li>Last health check timestamp</li>
+</ul>
+<p>This page is entirely read-only. No mutations. It auto-refreshes via SSE.</p>
+<hr />
+<h4 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h4>
+<p>Time-series token consumption charts for capacity planning and cost attribution.</p>
+<p><strong>Charts:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Chart</th>
+<th>X-axis</th>
+<th>Y-axis</th>
+<th>Granularity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total tokens/hour across all providers</td>
+<td>Time</td>
+<td>Tokens</td>
+<td>1h buckets, last 24h</td>
+</tr>
+<tr>
+<td>Per-provider token breakdown</td>
+<td>Time</td>
+<td>Tokens (stacked)</td>
+<td>1h buckets, last 24h</td>
+</tr>
+<tr>
+<td>Per-account RPD utilization</td>
+<td>Account</td>
+<td>% of RPD limit used</td>
+<td>Current day</td>
+</tr>
+<tr>
+<td>Cache hit rate over time</td>
+<td>Time</td>
+<td>Hit %</td>
+<td>1h buckets, last 24h</td>
+</tr>
+</tbody>
+</table>
+<p>All charts use a time range selector (1h / 6h / 24h / 7d). The 7d view uses 6h buckets.</p>
+<p>Data source: <code>GET /management/v1/usage</code> with <code>?granularity=1h&amp;window=24h</code> query params.</p>
+<hr />
+<h4 id="audit-log_1">Audit Log<a class="headerlink" href="#audit-log_1" title="Permanent link">&para;</a></h4>
+<p>Append-only, paginated table of all management mutations.</p>
+<p><strong>Columns:</strong> Timestamp, Actor, Action, Target Type, Target ID, Request ID.</p>
+<p>Clicking a row expands an inline detail view showing the full <code>before</code> / <code>after</code> JSON diff.</p>
+<p><strong>Filters:</strong> Actor, Action type, Target type, Time range. No delete or export — operators should use direct DB access for bulk audit export.</p>
+<hr />
+<h3 id="34-live-update-strategy">3.4 Live Update Strategy<a class="headerlink" href="#34-live-update-strategy" title="Permanent link">&para;</a></h3>
+<p>The dashboard connects to <code>GET /management/v1/events</code> (SSE) on load and maintains a single persistent connection. All pages subscribe to the relevant subset of event types via a client-side event bus.</p>
+<p><strong>Reconnection policy:</strong> Exponential backoff starting at 1s, capped at 30s. The health badge shows a <code>"disconnected"</code> state while the SSE connection is down, to prevent operators from trusting stale data.</p>
+<p><strong>Polling fallback:</strong> Pages that show aggregate metrics (Usage, Overview semaphore gauge) use TanStack Query polling at intervals defined per-panel (10s for semaphore, 30s for health). SSE is for low-latency state changes; polling is for metric aggregates.</p>
+<hr />
+<h3 id="35-error-states">3.5 Error States<a class="headerlink" href="#35-error-states" title="Permanent link">&para;</a></h3>
+<p>Every panel and table has an explicit error state (not just empty state). Error states show:</p>
+<ul>
+<li>The specific API call that failed</li>
+<li>The HTTP status and error code from the response envelope</li>
+<li>A <strong>Retry</strong> button that re-triggers the query</li>
+<li>A link to the Audit Log filtered to recent entries (in case the error is caused by a concurrent mutation)</li>
+</ul>
+<p>Empty states (zero results, not errors) are distinct from error states. An empty Sessions table shows "No sessions match your filters" with a clear filters button, not an error message.</p>
+<hr />
+<h2 id="4-api-dashboard-mapping">4. API ↔ Dashboard Mapping<a class="headerlink" href="#4-api-dashboard-mapping" title="Permanent link">&para;</a></h2>
+<p>This table is the authoritative cross-reference between dashboard panels and their API dependencies. Any API change that affects a field in this table requires a corresponding dashboard update.</p>
+<table>
+<thead>
+<tr>
+<th>Dashboard Page / Panel</th>
+<th>API Endpoint(s)</th>
+<th>Update Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overview — health grid</td>
+<td><code>GET /health</code></td>
+<td>SSE + 30s poll</td>
+</tr>
+<tr>
+<td>Overview — active sessions</td>
+<td><code>GET /sessions?status=active</code></td>
+<td>SSE</td>
+</tr>
+<tr>
+<td>Overview — dirty sessions</td>
+<td><code>GET /sessions?status=dirty</code></td>
+<td>SSE</td>
+</tr>
+<tr>
+<td>Overview — accounts in cooldown</td>
+<td><code>GET /accounts</code></td>
+<td>SSE</td>
+</tr>
+<tr>
+<td>Overview — semaphore gauge</td>
+<td><code>GET /metrics</code></td>
+<td>10s poll</td>
+</tr>
+<tr>
+<td>Overview — events feed</td>
+<td>SSE <code>/events</code></td>
+<td>Live</td>
+</tr>
+<tr>
+<td>Sessions — table</td>
+<td><code>GET /sessions</code></td>
+<td>SSE + manual refresh</td>
+</tr>
+<tr>
+<td>Sessions — detail drawer</td>
+<td><code>GET /sessions/:id</code>, <code>GET /sessions/:id/turns</code></td>
+<td>On open</td>
+</tr>
+<tr>
+<td>Sessions — terminate</td>
+<td><code>DELETE /sessions/:id</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Sessions — reset</td>
+<td><code>POST /sessions/:id/reset</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Accounts — active tab</td>
+<td><code>GET /accounts</code></td>
+<td>SSE + manual refresh</td>
+</tr>
+<tr>
+<td>Accounts — cooldown tab</td>
+<td><code>GET /accounts</code> filtered</td>
+<td>SSE</td>
+</tr>
+<tr>
+<td>Accounts — force cooldown</td>
+<td><code>POST /accounts/:id/cooldown</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Accounts — recover</td>
+<td><code>POST /accounts/:id/recover</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Accounts — add</td>
+<td><code>POST /accounts</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Accounts — remove</td>
+<td><code>DELETE /accounts/:id</code></td>
+<td>Mutation</td>
+</tr>
+<tr>
+<td>Providers — cards</td>
+<td><code>GET /health/providers</code>, <code>GET /metrics</code></td>
+<td>SSE + 30s poll</td>
+</tr>
+<tr>
+<td>Usage — all charts</td>
+<td><code>GET /usage</code>, <code>GET /usage/accounts/:id</code></td>
+<td>Time-range poll</td>
+</tr>
+<tr>
+<td>Audit Log — table</td>
+<td><code>GET /audit</code></td>
+<td>Manual refresh + time-range filter</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-implementation-priorities">5. Implementation Priorities<a class="headerlink" href="#5-implementation-priorities" title="Permanent link">&para;</a></h2>
+<p>In order:</p>
+<ol>
+<li><strong>Core management API</strong> — <code>GET /health</code>, <code>GET /sessions</code>, <code>GET /accounts</code>. These unblock all dashboard development.</li>
+<li><strong>SSE events stream</strong> — <code>GET /events</code>. Required for live dashboard updates; implement early so the dashboard is never polling-only.</li>
+<li><strong>Account mutation endpoints</strong> — <code>POST /accounts</code>, <code>DELETE /accounts</code>, cooldown/recover. Required for ops to manage the pool without direct DB access.</li>
+<li><strong>Session mutation endpoints</strong> — <code>DELETE /sessions/:id</code>, <code>POST /sessions/:id/reset</code>. Required for triage workflows.</li>
+<li><strong>Dashboard scaffold</strong> — Layout, auth flow, Overview page wired to live data.</li>
+<li><strong>Sessions page</strong> — Table + detail drawer + diff viewer.</li>
+<li><strong>Accounts page</strong> — Active/Cooldown tabs + Add Account modal.</li>
+<li><strong>Providers page</strong> — Read-only, straightforward once health endpoints exist.</li>
+<li><strong>Usage page</strong> — Charts require <code>GET /usage</code> time-series data; implement last as it has the most backend aggregation work.</li>
+<li><strong>Audit log page</strong> — Low complexity once the audit trail is written by the mutation endpoints.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

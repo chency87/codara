@@ -1,0 +1,15 @@
+# Changes here are tracked so `copier update` can keep this project in sync.
+_src_path: "/workspaces/ptemplate"
+_commit: ""
+project_name: "codara"
+project_slug: "codara"
+description: "A multi-language project workspace generated from this Copier template."
+author_name: ""
+with_python: True
+
+python_package_name: "codara"
+python_version: "3.12"
+
+with_rust: False
+
+with_scripts: True

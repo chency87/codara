@@ -1,0 +1,38 @@
+site_name: Codara
+site_description: Unified Agent Gateway (UAG) - Bridge stateless API clients with stateful CLI agents
+site_url: https://github.com/codara/codara
+repo_url: https://github.com/codara/codara
+
+theme:
+  name: readthedocs
+  palette:
+    - primary: indigo
+    - accent: blue
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.structure
+
+nav:
+  - Home: index.md
+  - Architecture:
+    - architecture.md
+    - accountpool.md
+    - token_usage.md
+  - API & Dashboard: api-dashboard.md
+  - Technical Documentation:
+    - technical-documentation.md
+  - Alignment Judgement: alignment-judgement.md
+  - User Management: user-management-design.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+  
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/codara/codara

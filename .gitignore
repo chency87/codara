@@ -1,0 +1,31 @@
+# Common
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.venv/
+
+# Rust
+target/
+
+# Editors
+.idea/
+.vscode/
+
+# Local AI agent overrides
+.gemini/tmp/
+.opencode/session/
+.agents
+.codex
+.gemini
+.opencode
+
+logs/
+workspaces/
+codara.db
+codara.toml
+.env

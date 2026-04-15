@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codara"
+version = "0.1.0"
+description = "A multi-language project workspace generated from this Copier template."
+readme = "README.md"
+requires-python = ">= 3.12"
+dependencies = [
+  "fastapi>=0.100.0",
+  "uvicorn>=0.22.0",
+  "click>=8.1.0",
+  "pydantic>=2.0.0",
+  "pydantic-settings>=2.0.0",
+]
+
+[project.scripts]
+codara = "codara.cli.main:cli"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

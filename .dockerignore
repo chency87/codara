@@ -1,0 +1,80 @@
+# ============================================================
+# Docker Build Context Exclusions
+# ============================================================
+# Files and directories to exclude from Docker build context
+# This reduces build time and image size
+# ============================================================
+
+# Version control
+.git
+.gitignore
+.svn
+.hg
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.eggs/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Documentation
+docs/_build/
+site/
+
+# UI build artifacts (we copy from ui/dist only)
+ui/node_modules/
+ui/.vite/
+ui/dist/  # Built separately in multi-stage build
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Agent data (should be in volumes)
+codara.db
+*.db-journal
