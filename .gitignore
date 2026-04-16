@@ -28,6 +28,7 @@ site/
 logs/
 workspaces/
 runtime/
+traces/
 codara.db
 codara.toml
 .env
