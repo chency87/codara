@@ -68,6 +68,21 @@ export interface AuditLogRecord {
   timestamp: number;
 }
 
+export interface RuntimeLogRecord {
+  timestamp: string;
+  level: string;
+  logger: string;
+  message: string;
+  trace_id?: string | null;
+  span_id?: string | null;
+  parent_span_id?: string | null;
+  request_id?: string | null;
+  component?: string | null;
+  event_name?: string | null;
+  attributes?: Record<string, any> | null;
+  exception?: string | null;
+}
+
 export interface RuntimeComponent {
   status?: string;
   latency_ms?: number | null;
@@ -343,4 +358,35 @@ export interface WorkspaceRecord {
 export interface WorkspaceDetailPayload extends WorkspaceRecord {
   users: WorkspaceUserBinding[];
   sessions: WorkspaceSessionBinding[];
+}
+
+export interface TraceEvent {
+  event_id: string;
+  trace_id: string;
+  span_id?: string | null;
+  parent_span_id?: string | null;
+  kind: string;
+  name: string;
+  component?: string | null;
+  level?: string | null;
+  status?: string | null;
+  request_id?: string | null;
+  started_at: number;
+  ended_at?: number | null;
+  duration_ms?: number | null;
+  attributes?: Record<string, any> | null;
+}
+
+export interface TraceRecord {
+  trace_id: string;
+  span_id: string;
+  name: string;
+  component: string;
+  level: string;
+  status: string;
+  request_id: string;
+  started_at: number;
+  ended_at: number;
+  duration_ms: number;
+  attributes: Record<string, any>;
 }

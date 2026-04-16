@@ -934,20 +934,33 @@ codara serve --host 0.0.0.0 --port 8000
 
 ```toml
 # codara.toml
+[server]
 host = "0.0.0.0"
 port = 8000
-database_path = "/var/lib/codara/codara.db"
+secret_key = "${UAG_MGMT_SECRET}"
+
+[database]
+path = "/var/lib/codara/codara.db"
+
+[orchestrator]
 max_concurrency = 10
 session_ttl_hours = 24
-workspaces_root = "/var/workspaces"
+
+[workspace]
+root = "/var/workspaces"
 isolated_envs_root = "/var/workspaces/isolated_envs"
-workspace_lock_timeout = 300
-secret_key = "${UAG_MGMT_SECRET}"
-codex_usage_endpoints = "https://chatgpt.com/backend-api/wham/usage,https://api.openai.com/dashboard/codex/usage"
-codex_oauth_url = "https://auth0.openai.com/oauth/token"
-codex_default_model = "gpt-5-codex"
-gemini_default_model = "gemini-2.5-pro"
-opencode_default_model = "openai/gpt-5"
+lock_timeout = 300
+
+[providers.codex]
+usage_endpoints = "https://chatgpt.com/backend-api/wham/usage,https://api.openai.com/dashboard/codex/usage"
+oauth_url = "https://auth0.openai.com/oauth/token"
+default_model = "gpt-5-codex"
+
+[providers.gemini]
+default_model = "gemini-2.5-pro"
+
+[providers.opencode]
+default_model = "openai/gpt-5"
 ```
 
 ### 8.3 Scaling Strategy

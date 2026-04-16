@@ -11,16 +11,53 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
     config_file.write_text(
         "\n".join(
             [
-                'app_name = "Codara Test"',
+                "[app]",
+                'name = "Codara Test"',
+                "",
+                "[server]",
                 "port = 9001",
-                'database_path = "custom.db"',
-                'workspaces_root = "workspaces-root"',
+                "",
+                "[database]",
+                'path = "custom.db"',
+                "",
+                "[workspace]",
+                'root = "workspaces-root"',
                 'isolated_envs_root = "shared-isolated"',
-                'codex_billing_api_key = "sk-billing-test"',
-                'codex_usage_endpoints = "https://example.test/usage-a,https://example.test/usage-b"',
-                'codex_oauth_url = "https://example.test/oauth"',
-                'gemini_usage_endpoints = "https://example.test/gemini-a,https://example.test/gemini-b"',
+                "",
+                "[logging]",
+                'runtime_root = "runtime-store"',
+                "retention_days = 12",
+                "",
+                "[providers.codex]",
+                'billing_api_key = "sk-billing-test"',
+                'usage_endpoints = "https://example.test/usage-a,https://example.test/usage-b"',
+                'oauth_url = "https://example.test/oauth"',
+                "",
+                "[providers.gemini]",
+                'usage_endpoints = "https://example.test/gemini-a,https://example.test/gemini-b"',
+                "",
+                "[infra]",
                 'redis_url = "redis://localhost:6379/0"',
+                "",
+                "[telemetry]",
+                'persistence_backend = "file"',
+                'trace_root = "trace-store"',
+                "trace_retention_days = 9",
+                "",
+                "[channels.telegram]",
+                "enabled = true",
+                'receive_mode = "webhook"',
+                "mention_only = true",
+                "",
+                "[[channels.telegram.bots]]",
+                'name = "engineering-bot"',
+                'token = "bot-token-1"',
+                'webhook_secret = "bot-secret-1"',
+                'username = "eng_bot"',
+                "",
+                "[[channels.telegram.bots]]",
+                'name = "ops-bot"',
+                'token = "bot-token-2"',
             ]
         )
     )
@@ -40,6 +77,16 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
     assert settings.codex_usage_endpoints == "https://example.test/usage-a,https://example.test/usage-b"
     assert settings.codex_oauth_url == "https://example.test/oauth"
     assert settings.gemini_usage_endpoints == "https://example.test/gemini-a,https://example.test/gemini-b"
+    assert settings.telemetry_persistence_backend == "file"
+    assert settings.telemetry_trace_root == str((tmp_path / "trace-store").resolve())
+    assert settings.telemetry_trace_retention_days == 9
+    assert settings.runtime_log_root == str((tmp_path / "runtime-store").resolve())
+    assert settings.log_retention_days == 12
+    assert settings.channels.telegram.enabled is True
+    assert settings.channels.telegram.receive_mode == "webhook"
+    assert settings.channels.telegram.mention_only is True
+    assert [bot.name for bot in settings.channels.telegram.bots] == ["engineering-bot", "ops-bot"]
+    assert settings.channels.telegram.bots[0].webhook_secret == "bot-secret-1"
 
 def test_secret_store_persists_generated_key(tmp_path):
     key_path = tmp_path / "master.key"
@@ -94,7 +141,7 @@ def test_management_login_reads_api_token_next_to_active_config(tmp_path, monkey
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     config_path = config_dir / "codara.toml"
-    config_path.write_text('secret_key = "config-secret"\n', encoding="utf-8")
+    config_path.write_text("[server]\nsecret_key = \"config-secret\"\n", encoding="utf-8")
     (config_dir / ".env").write_text("API_TOKEN=config-dir-passkey\n", encoding="utf-8")
 
     monkeypatch.setenv("UAG_CONFIG_PATH", str(config_path))
