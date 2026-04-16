@@ -19,6 +19,7 @@ from codara.adapters.opencode import OpenCodeAdapter
 from codara.adapters.base import ProviderAdapter
 from codara.core.atr import ATRModule
 from codara.config import resolve_provider_model
+from codara.telemetry import record_event, start_span
 
 class Orchestrator:
     def __init__(self, db_manager: DatabaseManager, max_concurrency: int = 10):
@@ -61,6 +62,16 @@ class Orchestrator:
         # 1. Session Lookup
         session_id = options.client_session_id or str(uuid4())
         resolved_provider_model = resolve_provider_model(options.provider, provider_model)
+        record_event(
+            "orchestrator.request.bound",
+            component="orchestrator",
+            db=self.db,
+            attributes={
+                "session_id": session_id,
+                "provider": options.provider.value,
+                "workspace_root": options.workspace_root,
+            },
+        )
         
         async with self._get_session_lock(session_id):
             session = self.db.get_session(session_id)
@@ -185,6 +196,22 @@ class Orchestrator:
                         try:
                             execution_started = perf_counter()
                             actor = f"user:{user_id}" if user_id else "system:orchestrator"
+                            record_event(
+                                "adapter.execution.started",
+                                component=f"adapter.{options.provider.value}",
+                                db=self.db,
+                                attributes={
+                                    "provider": options.provider.value,
+                                    "provider_model": resolved_provider_model,
+                                    "adapter": adapter.__class__.__name__,
+                                    "account_id": session.account_id,
+                                    "backend_id": session.backend_id or None,
+                                    "workspace_root": session.cwd_path,
+                                    "manual_mode": options.manual_mode,
+                                    "attempt": attempt,
+                                    "message_count": len(current_messages),
+                                },
+                            )
                             self.db.record_audit(
                                 actor=actor,
                                 action="adapter.execution.started",
@@ -202,8 +229,36 @@ class Orchestrator:
                                     "message_count": len(current_messages),
                                 },
                             )
-                            turn_result = await adapter.send_turn(session, current_messages, resolved_provider_model)
+                            async with start_span(
+                                "adapter.send_turn",
+                                component=f"adapter.{options.provider.value}",
+                                db=self.db,
+                                attributes={
+                                    "provider": options.provider.value,
+                                    "adapter": adapter.__class__.__name__,
+                                    "account_id": session.account_id,
+                                    "attempt": attempt,
+                                },
+                            ):
+                                turn_result = await adapter.send_turn(session, current_messages, resolved_provider_model)
                             duration_ms = round((perf_counter() - execution_started) * 1000, 2)
+                            record_event(
+                                "adapter.execution.completed",
+                                component=f"adapter.{options.provider.value}",
+                                db=self.db,
+                                status="ok",
+                                attributes={
+                                    "provider": options.provider.value,
+                                    "provider_model": resolved_provider_model,
+                                    "adapter": adapter.__class__.__name__,
+                                    "account_id": session.account_id,
+                                    "backend_id": turn_result.backend_id,
+                                    "finish_reason": turn_result.finish_reason,
+                                    "reported_context_tokens": turn_result.context_tokens,
+                                    "duration_ms": duration_ms,
+                                    "attempt": attempt,
+                                },
+                            )
                             self.db.record_audit(
                                 actor=actor,
                                 action="adapter.execution.completed",
@@ -223,6 +278,23 @@ class Orchestrator:
                             )
                         except Exception as e:
                             duration_ms = round((perf_counter() - execution_started) * 1000, 2)
+                            record_event(
+                                "adapter.execution.failed",
+                                component=f"adapter.{options.provider.value}",
+                                db=self.db,
+                                level="ERROR",
+                                status="error",
+                                attributes={
+                                    "provider": options.provider.value,
+                                    "provider_model": resolved_provider_model,
+                                    "adapter": adapter.__class__.__name__,
+                                    "account_id": session.account_id,
+                                    "backend_id": session.backend_id or None,
+                                    "duration_ms": duration_ms,
+                                    "attempt": attempt,
+                                    "error": str(e),
+                                },
+                            )
                             self.db.record_audit(
                                 actor=actor,
                                 action="adapter.execution.failed",
@@ -313,6 +385,19 @@ class Orchestrator:
                                 cache_hit_tokens=0,
                                 request_count=1,
                             )
+                        record_event(
+                            "orchestrator.request.completed",
+                            component="orchestrator",
+                            db=self.db,
+                            status="ok",
+                            attributes={
+                                "session_id": session.client_session_id,
+                                "provider": options.provider.value,
+                                "finish_reason": turn_result.finish_reason,
+                                "output_tokens": tokens_delta,
+                                "dirty": turn_result.dirty,
+                            },
+                        )
 
                         return turn_result
 
@@ -321,6 +406,19 @@ class Orchestrator:
                         if attempt >= max_retries - 1:
                             session.status = SessionStatus.DIRTY
                             self.db.save_session(session)
+                            record_event(
+                                "orchestrator.request.failed",
+                                component="orchestrator",
+                                db=self.db,
+                                level="ERROR",
+                                status="error",
+                                attributes={
+                                    "session_id": session.client_session_id,
+                                    "provider": options.provider.value,
+                                    "attempt": attempt,
+                                    "error": str(e),
+                                },
+                            )
                             raise e
                         attempt += 1
                     finally:

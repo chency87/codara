@@ -60,6 +60,14 @@ class WorkspaceManager:
             shutil.rmtree(path)
         return wiped
 
+    def validate_inference_workspace(self, workspace_path: str) -> Path:
+        path = Path(workspace_path).expanduser().resolve(strict=False)
+        if not self._is_managed_workspace(path):
+            raise ValueError("Workspace path is outside the managed safe zone")
+        if not path.exists() or not path.is_dir():
+            raise FileNotFoundError("Workspace path does not exist")
+        return path
+
     def _validate_actionable_path(self, workspace_path: str) -> Path:
         path = Path(workspace_path).expanduser().resolve(strict=False)
         if not self._is_managed_workspace(path) or path == self.workspaces_root:

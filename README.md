@@ -39,7 +39,7 @@ codara serve --build-ui
 
 If you change files under `ui/src`, rebuild the dashboard before using the served `/dashboard` bundle. `codara serve` warns when the checked-in `ui/dist` build is older than the current UI source tree.
 
-Runtime defaults come from [`codara.toml`](codara.toml). Environment variables still override config values, including:
+Runtime defaults come from [`codara.toml`](codara.toml), which is organized into blocks such as `[server]`, `[workspace]`, `[providers.*]`, and `[channels.*]`. Environment variables still override config values, including:
 
 - `API_TOKEN` for operator login (`UAG_MGMT_SECRET` remains a supported fallback alias)
 - `UAG_WORKSPACES_ROOT` for provisioned user workspaces
@@ -86,12 +86,17 @@ The dashboard is a thin client over `/management/v1/*`. Useful endpoints:
 - `GET /management/v1/overview`
 - `GET /management/v1/workspaces`
 - `GET /management/v1/accounts`
+- `GET /management/v1/traces`
+- `GET /management/v1/logs`
 - `GET /management/v1/providers/models`
 - `POST /management/v1/playground/chat`
 - `POST /management/v1/usage/refresh`
 - `GET /management/v1/audit`
 
 Usage/auth refresh activity is written into the audit log, and the audit page supports text search plus actor/action/target filters.
+Runtime logs are emitted as structured JSON and trace events are persisted as datetime-partitioned JSONL files under the configured telemetry trace root. The management plane exposes trace roots and trace-event details for cross-component debugging.
+The dashboard includes an **Observability** explorer that lets operators search trace roots and runtime messages together, then reconstruct a trace-centric timeline from correlated events and log lines.
+Use `[logging].retention_days` and `[telemetry].trace_retention_days` to control how long file-backed runtime logs and trace shards are kept. The Observability explorer also supports quick and custom time-range filters.
 
 The dashboard Playground runs as a dedicated **Dashboard Admin** user inside the provisioned workspaces root. That default user is managed like any other provisioned user, remains visible in the Users panel, and Playground turns bind to that user's active API-key identity and `workspace_id` instead of an arbitrary absolute path.
 

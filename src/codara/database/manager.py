@@ -1,9 +1,15 @@
 import hashlib
 import json
 import os
+import queue
 import sqlite3
+import threading
+import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional, List
+from codara.config import get_settings
+from codara.trace_store import FileTraceStore
 
 from codara.core.models import (
     Session,
@@ -23,6 +29,101 @@ class DatabaseManager:
     def __init__(self, db_path: str = "codara.db"):
         self.db_path = db_path
         self._initialize_db()
+        settings = get_settings()
+        self._trace_backend = settings.telemetry_persistence_backend.strip().lower()
+        trace_root = Path(settings.telemetry_trace_root).expanduser()
+        if not trace_root.is_absolute():
+            trace_root = Path(settings.logs_root).expanduser() / trace_root
+        self._trace_store = FileTraceStore(str(trace_root)) if self._trace_backend == "file" else None
+        if self._trace_store is not None and settings.telemetry_trace_retention_days > 0:
+            cutoff_ms = self._now_ms() - settings.telemetry_trace_retention_days * 24 * 60 * 60 * 1000
+            self._trace_store.prune_older_than(cutoff_ms)
+        self._trace_queue: queue.Queue = queue.Queue(maxsize=10000)
+        self._trace_worker_thread = threading.Thread(target=self._trace_worker, daemon=True, name="trace-persist-worker")
+        self._trace_worker_thread.start()
+
+    def _trace_worker(self):
+        while True:
+            batch = []
+            try:
+                # Wait for at least one item
+                item = self._trace_queue.get()
+                batch.append(item)
+                
+                # Try to get more items if available, up to 200
+                while len(batch) < 200:
+                    try:
+                        item = self._trace_queue.get_nowait()
+                        batch.append(item)
+                    except queue.Empty:
+                        break
+                
+                if batch:
+                    self._persist_trace_batch(batch)
+                
+                for _ in range(len(batch)):
+                    self._trace_queue.task_done()
+                    
+            except Exception:
+                # Avoid crashing the worker thread; in a real app we would log this
+                time.sleep(1)
+
+    def _persist_trace_batch(self, batch: List[tuple]):
+        try:
+            if self._trace_store is not None:
+                rows = [
+                    {
+                        "event_id": event_id,
+                        "trace_id": trace_id,
+                        "span_id": span_id,
+                        "parent_span_id": parent_span_id,
+                        "kind": kind,
+                        "name": name,
+                        "component": component,
+                        "level": level,
+                        "status": status,
+                        "request_id": request_id,
+                        "started_at": started_at,
+                        "ended_at": ended_at,
+                        "duration_ms": duration_ms,
+                        "attributes": json.loads(attributes) if attributes else None,
+                    }
+                    for (
+                        event_id,
+                        trace_id,
+                        span_id,
+                        parent_span_id,
+                        kind,
+                        name,
+                        component,
+                        level,
+                        status,
+                        request_id,
+                        started_at,
+                        ended_at,
+                        duration_ms,
+                        attributes,
+                    ) in batch
+                ]
+                self._trace_store.append_batch(rows)
+                return
+            with self._get_connection() as conn:
+                conn.executemany(
+                    """
+                    INSERT INTO trace_events
+                    (event_id, trace_id, span_id, parent_span_id, kind, name, component, level, status, request_id, started_at, ended_at, duration_ms, attributes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    batch
+                )
+                conn.commit()
+        except Exception:
+            # If batch persist fails, we log it (if we had a logger here) and continue
+            pass
+
+    def wait_for_traces(self):
+        """Wait for all currently queued trace events to be persisted. Used primarily for testing."""
+        self._trace_queue.join()
 
     def _get_connection(self):
         conn = sqlite3.connect(self.db_path)
@@ -124,6 +225,24 @@ class DatabaseManager:
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS trace_events (
+                    event_id          TEXT        PRIMARY KEY,
+                    trace_id          TEXT        NOT NULL,
+                    span_id           TEXT,
+                    parent_span_id    TEXT,
+                    kind              TEXT        NOT NULL,
+                    name              TEXT        NOT NULL,
+                    component         TEXT,
+                    level             TEXT,
+                    status            TEXT,
+                    request_id        TEXT,
+                    started_at        INTEGER     NOT NULL,
+                    ended_at          INTEGER,
+                    duration_ms       REAL,
+                    attributes        TEXT
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id         TEXT        PRIMARY KEY,
                     email           TEXT        NOT NULL UNIQUE,
@@ -173,6 +292,48 @@ class DatabaseManager:
                     reset_at        INTEGER     NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_user_links (
+                    channel          TEXT        NOT NULL,
+                    bot_name         TEXT        NOT NULL DEFAULT '',
+                    external_user_id TEXT        NOT NULL,
+                    user_id          TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    external_chat_id TEXT,
+                    status           TEXT        NOT NULL DEFAULT 'active',
+                    created_at       INTEGER     NOT NULL,
+                    updated_at       INTEGER     NOT NULL,
+                    PRIMARY KEY (channel, bot_name, external_user_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_conversations (
+                    channel          TEXT        NOT NULL,
+                    bot_name         TEXT        NOT NULL DEFAULT '',
+                    conversation_key TEXT        NOT NULL,
+                    user_id          TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    external_chat_id TEXT,
+                    external_thread_id TEXT,
+                    workspace_id     TEXT        NOT NULL DEFAULT 'default',
+                    provider         TEXT        NOT NULL DEFAULT 'codex',
+                    session_label    TEXT        NOT NULL,
+                    created_at       INTEGER     NOT NULL,
+                    updated_at       INTEGER     NOT NULL,
+                    PRIMARY KEY (channel, bot_name, conversation_key)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_link_tokens (
+                    token_id         TEXT        PRIMARY KEY,
+                    token_hash       TEXT        NOT NULL UNIQUE,
+                    user_id          TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                    channel          TEXT        NOT NULL,
+                    bot_name         TEXT        NOT NULL DEFAULT '',
+                    created_by       TEXT        NOT NULL,
+                    created_at       INTEGER     NOT NULL,
+                    expires_at       INTEGER     NOT NULL,
+                    consumed_at      INTEGER
+                )
+            """)
             self._ensure_column(conn, "turns", "user_id", "TEXT")
             self._ensure_column(conn, "sessions", "user_id", "TEXT")
             self._ensure_column(conn, "sessions", "api_key_id", "TEXT")
@@ -186,11 +347,22 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_api_key ON sessions(api_key_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_turns_session   ON turns(client_session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_trace_events_trace ON trace_events(trace_id, started_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_trace_events_request ON trace_events(request_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_trace_events_component ON trace_events(component, started_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_trace_events_started ON trace_events(started_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email      ON users(email)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user     ON api_keys(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash     ON api_keys(key_hash)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_user_usage_user   ON user_usage(user_id, period)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_resets_user       ON workspace_resets(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_links_user ON channel_user_links(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_conversations_user ON channel_conversations(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_tokens_user ON channel_link_tokens(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_tokens_channel ON channel_link_tokens(channel)")
+            self._ensure_column(conn, "channel_user_links", "bot_name", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "channel_conversations", "bot_name", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "channel_link_tokens", "bot_name", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "accounts", "cli_primary", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "accounts", "credential_id", "TEXT")
             self._ensure_column(conn, "accounts", "inventory_source", "TEXT NOT NULL DEFAULT 'vault'")
@@ -299,6 +471,14 @@ class DatabaseManager:
     def _hash_api_key(self, raw_key: str) -> str:
         return hashlib.sha256(raw_key.encode()).hexdigest()
 
+    def _hash_channel_token(self, raw_token: str) -> str:
+        return hashlib.sha256(raw_token.encode()).hexdigest()
+
+    def _json_default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        raise TypeError("Type %s not serializable" % type(obj))
+
     def record_turn(self, turn_id: str, session_id: str, provider: str, account_id: str,
                     input_tokens: int, output_tokens: int, finish_reason: str,
                     duration_ms: int, diff: Optional[str], actions: Optional[List[dict]],
@@ -339,11 +519,6 @@ class DatabaseManager:
                      before: Optional[dict] = None, after: Optional[dict] = None,
                      request_id: Optional[str] = None):
         from uuid import uuid4
-        
-        def json_serial(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            raise TypeError ("Type %s not serializable" % type(obj))
 
         audit_id = f"aud_{uuid4().hex[:12]}"
         now = int(self._now().timestamp())
@@ -354,12 +529,158 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 audit_id, actor, action, target_type, target_id,
-                json.dumps(before, default=json_serial) if before else None,
-                json.dumps(after, default=json_serial) if after else None,
+                json.dumps(before, default=self._json_default) if before else None,
+                json.dumps(after, default=self._json_default) if after else None,
                 request_id,
                 now
             ))
             conn.commit()
+
+    def record_trace_event(
+        self,
+        *,
+        trace_id: str,
+        span_id: Optional[str],
+        parent_span_id: Optional[str],
+        kind: str,
+        name: str,
+        component: Optional[str],
+        level: Optional[str],
+        status: Optional[str],
+        request_id: Optional[str],
+        started_at_ms: int,
+        ended_at_ms: Optional[int],
+        duration_ms: Optional[float],
+        attributes: Optional[dict],
+    ) -> str:
+        event_id = self._generate_ulid_like("trc_evt")
+        try:
+            self._trace_queue.put_nowait((
+                event_id,
+                trace_id,
+                span_id,
+                parent_span_id,
+                kind,
+                name,
+                component,
+                level,
+                status,
+                request_id,
+                started_at_ms,
+                ended_at_ms,
+                duration_ms,
+                json.dumps(attributes, default=self._json_default) if attributes else None,
+            ))
+        except queue.Full:
+            # Drop the event if the queue is overloaded to avoid impacting main thread.
+            pass
+        return event_id
+
+    def list_traces(
+        self,
+        *,
+        limit: int = 50,
+        after: Optional[int] = None,
+        component: Optional[str] = None,
+        request_id: Optional[str] = None,
+        status: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        search: Optional[str] = None,
+        since: Optional[int] = None,
+        until: Optional[int] = None,
+    ) -> List[dict]:
+        if self._trace_store is not None:
+            return self._trace_store.list_traces(
+                limit=limit,
+                after=after,
+                component=component,
+                request_id=request_id,
+                status=status,
+                trace_id=trace_id,
+                search=search,
+                since=since,
+                until=until,
+            )
+        query = """
+            SELECT trace_id, span_id, name, component, level, status, request_id, started_at, ended_at, duration_ms, attributes
+            FROM trace_events
+            WHERE kind = 'span' AND parent_span_id IS NULL
+        """
+        params: list[object] = []
+        if after is not None:
+            query += " AND started_at < ?"
+            params.append(after)
+        if since is not None:
+            query += " AND started_at >= ?"
+            params.append(since)
+        if until is not None:
+            query += " AND started_at <= ?"
+            params.append(until)
+        if component:
+            query += " AND component = ?"
+            params.append(component)
+        if request_id:
+            query += " AND request_id = ?"
+            params.append(request_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if trace_id:
+            query += " AND trace_id = ?"
+            params.append(trace_id)
+        if search:
+            pattern = f"%{search.lower()}%"
+            query += """
+             AND (
+                lower(trace_id) LIKE ?
+                OR lower(name) LIKE ?
+                OR lower(component) LIKE ?
+                OR lower(coalesce(request_id, '')) LIKE ?
+                OR lower(coalesce(attributes, '')) LIKE ?
+             )
+            """
+            params.extend([pattern, pattern, pattern, pattern, pattern])
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [self._deserialize_trace_row(dict(row)) for row in rows]
+
+    def prune_traces(self, retention_days: int) -> dict:
+        if retention_days <= 0:
+            return {"files_deleted": 0, "files_rewritten": 0, "records_deleted": 0}
+        cutoff_ms = self._now_ms() - retention_days * 24 * 60 * 60 * 1000
+        if self._trace_store is not None:
+            return self._trace_store.prune_older_than(cutoff_ms)
+        with self._get_connection() as conn:
+            before = conn.execute("SELECT COUNT(*) AS count FROM trace_events").fetchone()["count"]
+            conn.execute("DELETE FROM trace_events WHERE started_at < ?", (cutoff_ms,))
+            conn.commit()
+            after = conn.execute("SELECT COUNT(*) AS count FROM trace_events").fetchone()["count"]
+        return {"files_deleted": 0, "files_rewritten": 0, "records_deleted": int(before) - int(after)}
+
+    def get_trace_events(self, trace_id: str) -> List[dict]:
+        if self._trace_store is not None:
+            return self._trace_store.get_trace_events(trace_id)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM trace_events
+                WHERE trace_id = ?
+                ORDER BY started_at ASC, event_id ASC
+                """,
+                (trace_id,),
+            ).fetchall()
+            return [self._deserialize_trace_row(dict(row)) for row in rows]
+
+    def _deserialize_trace_row(self, row: dict) -> dict:
+        attributes = row.get("attributes")
+        if isinstance(attributes, str) and attributes:
+            try:
+                row["attributes"] = json.loads(attributes)
+            except json.JSONDecodeError:
+                pass
+        return row
 
     def get_audit_logs(
         self,
@@ -1230,6 +1551,161 @@ class DatabaseManager:
                 SELECT * FROM workspace_resets WHERE user_id = ? ORDER BY reset_at DESC
             """, (user_id,)).fetchall()
             return [dict(row) for row in rows]
+
+    def get_channel_user_link(self, channel: str, bot_name: str, external_user_id: str) -> Optional[dict]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM channel_user_links
+                WHERE channel = ? AND bot_name = ? AND external_user_id = ?
+                """,
+                (channel, bot_name, external_user_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def save_channel_user_link(
+        self,
+        *,
+        channel: str,
+        bot_name: str,
+        external_user_id: str,
+        user_id: str,
+        external_chat_id: Optional[str] = None,
+        status: str = "active",
+    ) -> dict:
+        now = self._now_ms()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_user_links
+                (channel, bot_name, external_user_id, user_id, external_chat_id, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, bot_name, external_user_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    external_chat_id = excluded.external_chat_id,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+                """,
+                (channel, bot_name, external_user_id, user_id, external_chat_id, status, now, now),
+            )
+            conn.commit()
+        return self.get_channel_user_link(channel, bot_name, external_user_id) or {}
+
+    def get_channel_conversation(self, channel: str, bot_name: str, conversation_key: str) -> Optional[dict]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM channel_conversations
+                WHERE channel = ? AND bot_name = ? AND conversation_key = ?
+                """,
+                (channel, bot_name, conversation_key),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def save_channel_conversation(
+        self,
+        *,
+        channel: str,
+        bot_name: str,
+        conversation_key: str,
+        user_id: str,
+        external_chat_id: Optional[str],
+        external_thread_id: Optional[str],
+        workspace_id: str,
+        provider: str,
+        session_label: str,
+    ) -> dict:
+        now = self._now_ms()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_conversations
+                (channel, bot_name, conversation_key, user_id, external_chat_id, external_thread_id, workspace_id, provider, session_label, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, bot_name, conversation_key) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    external_chat_id = excluded.external_chat_id,
+                    external_thread_id = excluded.external_thread_id,
+                    workspace_id = excluded.workspace_id,
+                    provider = excluded.provider,
+                    session_label = excluded.session_label,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    channel,
+                    bot_name,
+                    conversation_key,
+                    user_id,
+                    external_chat_id,
+                    external_thread_id,
+                    workspace_id,
+                    provider,
+                    session_label,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        return self.get_channel_conversation(channel, bot_name, conversation_key) or {}
+
+    def create_channel_link_token(
+        self,
+        *,
+        user_id: str,
+        channel: str,
+        bot_name: str,
+        created_by: str,
+        expires_in_minutes: int = 30,
+    ) -> dict:
+        from secrets import token_urlsafe
+
+        raw_token = token_urlsafe(18)
+        token_id = self._generate_ulid_like("uag_clt")
+        created_at = self._now_ms()
+        expires_at = created_at + max(expires_in_minutes, 1) * 60 * 1000
+        token_hash = self._hash_channel_token(raw_token)
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_link_tokens
+                (token_id, token_hash, user_id, channel, bot_name, created_by, created_at, expires_at, consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (token_id, token_hash, user_id, channel, bot_name, created_by, created_at, expires_at),
+            )
+            conn.commit()
+        return {
+            "token_id": token_id,
+            "raw_token": raw_token,
+            "user_id": user_id,
+            "channel": channel,
+            "bot_name": bot_name,
+            "created_by": created_by,
+            "created_at": self._row_to_datetime(created_at).isoformat(),
+            "expires_at": self._row_to_datetime(expires_at).isoformat(),
+        }
+
+    def consume_channel_link_token(self, raw_token: str, channel: str, bot_name: str) -> Optional[dict]:
+        token_hash = self._hash_channel_token(raw_token)
+        now = self._now_ms()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM channel_link_tokens
+                WHERE token_hash = ? AND channel = ? AND bot_name = ?
+                """,
+                (token_hash, channel, bot_name),
+            ).fetchone()
+            if not row:
+                return None
+            if row["consumed_at"] is not None or row["expires_at"] < now:
+                return None
+            conn.execute(
+                "UPDATE channel_link_tokens SET consumed_at = ? WHERE token_id = ?",
+                (now, row["token_id"]),
+            )
+            conn.commit()
+            return dict(row)
 
     def get_available_account(self, provider: ProviderType) -> Optional[Account]:
         now = int(datetime.now().timestamp())

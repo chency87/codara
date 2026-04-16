@@ -26,15 +26,20 @@ from codara.core.models import (
     UserStatus,
     ProviderType,
 )
-from codara.config import get_config_path, get_settings, resolve_provider_model
+from codara.config import get_config_path, get_settings, resolve_provider_model, get_telegram_bot_config
 from codara.orchestrator.engine import Orchestrator
 from codara.database.manager import DatabaseManager
 from codara.core.security import generate_api_key, hash_api_key
 from codara.accounts.monitor import UsageMonitor
 from codara.accounts.pool import AccountPool
 from codara.accounts.vault import CredentialVault
+from codara.runtime_log_store import RuntimeLogStore
+from codara.channels.service import ChannelService
+from codara.channels.telegram import TelegramChannelAdapter
+from codara.telemetry import current_request_id, current_trace_id, record_event, start_span, start_trace
 from codara.workspace.engine import WorkspaceEngine
 from codara.workspace.manager import WorkspaceManager
+from codara.services.inference import AttachmentInput, InferenceService
 
 # --- Models for Management API ---
 
@@ -368,38 +373,18 @@ def _workspace_session_token(workspace_id: str) -> str:
 
 
 def _resolve_user_workspace(base_workspace_path: str, workspace_id: Optional[str]) -> tuple[str, str]:
-    normalized = _normalize_workspace_id(workspace_id)
-    base_path = Path(base_workspace_path).expanduser().resolve()
-    base_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if normalized == "default":
-        WorkspaceEngine(str(base_path)).ensure_git_repository()
-        return str(base_path), normalized
-
-    workspace_path = (base_path / normalized).resolve()
-    if os.path.commonpath([str(base_path), str(workspace_path)]) != str(base_path):
-        raise HTTPException(status_code=400, detail="Invalid workspace_id")
-    workspace_path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        workspace_path.chmod(0o700)
-    except OSError:
-        pass
-    WorkspaceEngine(str(workspace_path)).ensure_git_repository()
-    return str(workspace_path), normalized
+    return _inference_service().resolve_user_workspace(base_workspace_path, workspace_id)
 
 
 def _user_session_id(user_id: str, workspace_id: str, session_label: Optional[str]) -> str:
-    return f"{user_id}::{_workspace_session_token(workspace_id)}::{session_label or 'default'}"
+    return _inference_service().user_session_id(user_id, workspace_id, session_label)
 
 
 _DASHBOARD_ADMIN_EMAIL = "dashboard-admin@codara.local"
 
 
 def _ensure_active_api_key(user_id: str, *, label: Optional[str] = None):
-    active_keys = db_manager.list_active_api_keys(user_id)
-    if active_keys:
-        return active_keys[0]
-    raw_key = generate_api_key()
-    return db_manager.save_api_key(user_id, raw_key, label=label)
+    return _inference_service().ensure_active_api_key(user_id, label=label)
 
 
 def _ensure_dashboard_admin_user():
@@ -480,34 +465,15 @@ async def _execute_user_bound_chat(
     default_session_label: Optional[str] = None,
     uploaded_files: Optional[list[UploadFile]] = None,
 ):
-    workspace_root, workspace_id = _resolve_user_workspace(
-        user.workspace_path,
-        chat_request.uag_options.workspace_id,
-    )
-    chat_request.uag_options.workspace_root = workspace_root
-    chat_request.uag_options.workspace_id = workspace_id
-    chat_request.uag_options.user_id = user.user_id
-    chat_request.uag_options.api_key_id = api_key.key_id
-    chat_request.uag_options.client_session_id = _user_session_id(
-        user.user_id,
-        workspace_id,
-        chat_request.uag_options.client_session_id or default_session_label,
-    )
-    provider_model = resolve_provider_model(
-        chat_request.uag_options.provider,
-        chat_request.model,
-        settings,
-    )
-    attachments = await _materialize_chat_uploads(
-        workspace_root,
-        chat_request.messages,
-        uploaded_files or [],
-        session_label=chat_request.uag_options.client_session_id or default_session_label,
-    )
-    result = await orchestrator.handle_request(
-        chat_request.uag_options,
-        chat_request.messages,
-        provider_model=provider_model,
+    attachment_inputs = await _attachment_inputs_from_uploads(uploaded_files or [])
+    result, workspace_root, workspace_id, attachments = await _inference_service().execute_user_turn(
+        model=chat_request.model,
+        messages=chat_request.messages,
+        options=chat_request.uag_options,
+        user=user,
+        api_key=api_key,
+        default_session_label=default_session_label,
+        attachments=attachment_inputs,
     )
     return result, workspace_root, workspace_id, attachments
 
@@ -567,6 +533,21 @@ def _sanitize_upload_name(filename: Optional[str], fallback_index: int) -> str:
 
 def _is_upload_file(value: Any) -> bool:
     return hasattr(value, "filename") and callable(getattr(value, "read", None))
+
+
+async def _attachment_inputs_from_uploads(uploaded_files: list[UploadFile]) -> list[AttachmentInput]:
+    attachments: list[AttachmentInput] = []
+    for index, upload in enumerate(uploaded_files, start=1):
+        filename = _sanitize_upload_name(getattr(upload, "filename", None), index)
+        content = await upload.read()
+        attachments.append(
+            AttachmentInput(
+                filename=getattr(upload, "filename", filename) or filename,
+                content=content,
+                content_type=getattr(upload, "content_type", None),
+            )
+        )
+    return attachments
 
 
 async def _materialize_chat_uploads(
@@ -744,6 +725,43 @@ def _workspace_manager() -> WorkspaceManager:
         workspaces_root=settings.workspaces_root,
         isolated_envs_root=settings.isolated_envs_root,
     )
+
+
+def _inference_service() -> InferenceService:
+    return InferenceService(db_manager, orchestrator, settings)
+
+
+def _channel_service() -> ChannelService:
+    return ChannelService(db_manager, _inference_service(), settings)
+
+
+def _runtime_log_store() -> RuntimeLogStore:
+    runtime_root = Path(settings.runtime_log_root).expanduser()
+    if not runtime_root.is_absolute():
+        runtime_root = Path(settings.logs_root).expanduser().resolve() / runtime_root
+    return RuntimeLogStore(str(runtime_root))
+
+
+def _telegram_adapter(bot_name: str) -> TelegramChannelAdapter:
+    bot = get_telegram_bot_config(bot_name, settings)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="Telegram bot not found")
+    return TelegramChannelAdapter(
+        _channel_service(),
+        channel_config=settings.channels.telegram,
+        bot_config=bot,
+    )
+
+
+def _validate_direct_workspace_root(workspace_root: Optional[str]) -> str:
+    if not workspace_root or not workspace_root.strip():
+        raise HTTPException(status_code=400, detail="workspace_root is required")
+    try:
+        return str(_workspace_manager().validate_inference_workspace(workspace_root))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="workspace_root not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="workspace_access_denied") from exc
 
 
 def _encode_workspace_id(workspace_path: str) -> str:
@@ -979,6 +997,28 @@ def _page_meta(items: list[object], cursor_field: str) -> dict:
     return {"page": {"cursor": cursor, "has_more": bool(items) and cursor is not None}}
 
 
+def _parse_time_filter(value: Optional[str]) -> Optional[int]:
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        numeric = float(raw)
+        # Browser/API clients generally send milliseconds; support seconds too.
+        if numeric < 10_000_000_000:
+            numeric *= 1000
+        return int(numeric)
+    except ValueError:
+        pass
+    try:
+        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid time filter: {value}") from exc
+
+
 def _serialize_activity(row: dict) -> dict:
     timestamp = row.get("timestamp")
     return {
@@ -1034,6 +1074,7 @@ orchestrator = Orchestrator(db_manager)
 management_router = APIRouter(prefix="/management/v1", dependencies=[Depends(get_current_operator)])
 auth_router = APIRouter(prefix="/management/v1/auth")
 user_router = APIRouter(prefix="/v1/user")
+channel_router = APIRouter(prefix="/channels")
 
 # --- Common Helper ---
 
@@ -1042,11 +1083,67 @@ def envelope(data: Any = None, meta: dict = None):
         "ok": True,
         "data": data,
         "meta": {
-            "request_id": f"req_{uuid4().hex[:12]}",
+            "request_id": current_request_id() or f"req_{uuid4().hex[:12]}",
+            "trace_id": current_trace_id(),
             "timestamp": datetime.now().isoformat(),
             **(meta or {})
         }
     }
+
+
+@app.middleware("http")
+async def telemetry_http_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-Id") or f"req_{uuid4().hex[:12]}"
+    path = request.url.path
+    async with start_trace(
+        "http.request",
+        component="gateway.http",
+        db=db_manager,
+        request_id=request_id,
+        attributes={"method": request.method, "path": path},
+    ) as span:
+        request.state.request_id = request_id
+        request.state.trace_id = span.trace_id
+        started = perf_counter()
+        record_event(
+            "http.request.received",
+            component="gateway.http",
+            db=db_manager,
+            attributes={"method": request.method, "path": path},
+        )
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            record_event(
+                "http.request.failed",
+                component="gateway.http",
+                db=db_manager,
+                level="ERROR",
+                status="error",
+                attributes={
+                    "method": request.method,
+                    "path": path,
+                    "duration_ms": round((perf_counter() - started) * 1000, 2),
+                    "error": str(exc),
+                    "exception_type": exc.__class__.__name__,
+                },
+            )
+            raise
+        response.headers["X-Trace-Id"] = span.trace_id or ""
+        response.headers["X-Request-Id"] = request_id
+        record_event(
+            "http.request.completed",
+            component="gateway.http",
+            db=db_manager,
+            status="ok",
+            attributes={
+                "method": request.method,
+                "path": path,
+                "status_code": response.status_code,
+                "duration_ms": round((perf_counter() - started) * 1000, 2),
+            },
+        )
+        return response
 
 # --- Inference API (SRDS §10) ---
 
@@ -1106,6 +1203,12 @@ class CreateUserKeyRequest(BaseModel):
     expires_at: Optional[datetime] = None
 
 
+class CreateChannelLinkTokenRequest(BaseModel):
+    channel: str
+    bot_name: Optional[str] = None
+    expires_in_minutes: int = 30
+
+
 class OperatorTokenRequest(BaseModel):
     operator_secret: Optional[str] = Field(
         None, validation_alias=AliasChoices("operator_secret", "operator_passkey", "api_token")
@@ -1154,6 +1257,9 @@ async def chat_completions(
             )
         elif authorization == f"Bearer {_operator_passkey()}":
             # Allow direct use of operator passkey as a bearer token for internal/automated turns
+            chat_request.uag_options.workspace_root = _validate_direct_workspace_root(
+                chat_request.uag_options.workspace_root
+            )
             attachments = await _materialize_chat_uploads(
                 chat_request.uag_options.workspace_root,
                 chat_request.messages,
@@ -1171,6 +1277,9 @@ async def chat_completions(
                 provider_model=provider_model,
             )
         else:
+            chat_request.uag_options.workspace_root = _validate_direct_workspace_root(
+                chat_request.uag_options.workspace_root
+            )
             attachments = await _materialize_chat_uploads(
                 chat_request.uag_options.workspace_root,
                 chat_request.messages,
@@ -1201,6 +1310,18 @@ async def chat_completions(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@channel_router.post("/telegram/{bot_name}/webhook", summary="Telegram webhook")
+async def telegram_webhook(bot_name: str, http_request: Request):
+    adapter = _telegram_adapter(bot_name)
+    adapter.verify_webhook_secret(http_request.headers.get("X-Telegram-Bot-Api-Secret-Token"))
+    try:
+        payload = await http_request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Telegram payload") from exc
+    result = await adapter.handle_update(payload)
+    return envelope(result)
 
 # --- Management API (v1) ---
 
@@ -1415,6 +1536,37 @@ async def rotate_user_key(user_id: str, payload: CreateUserKeyRequest, current_o
         **_serialize_api_key(key),
         "raw_key": raw_key,
     })
+
+
+@management_router.post("/users/{user_id}/channels/link-token", tags=[TAG_MANAGEMENT_USERS], summary="Create a channel link token")
+async def create_channel_link_token(user_id: str, payload: CreateChannelLinkTokenRequest, current_operator: dict = Depends(get_current_operator)):
+    user = db_manager.get_user(user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    channel = payload.channel.strip().lower()
+    if channel not in {"telegram", "lark", "feishu"}:
+        raise HTTPException(status_code=400, detail="Unsupported channel")
+    bot_name = (payload.bot_name or "").strip()
+    if channel == "telegram":
+        if not bot_name:
+            raise HTTPException(status_code=400, detail="bot_name is required for telegram")
+        if get_telegram_bot_config(bot_name, settings) is None:
+            raise HTTPException(status_code=404, detail="Telegram bot not found")
+    token = _channel_service().create_link_token(
+        user_id=user.user_id,
+        channel=channel,
+        bot_name=bot_name,
+        created_by=f"operator:{current_operator['id']}",
+        expires_in_minutes=payload.expires_in_minutes,
+    )
+    db_manager.record_audit(
+        actor=f"operator:{current_operator['id']}",
+        action="channel.link_token.created",
+        target_type="user",
+        target_id=user_id,
+        after={"channel": channel, "bot_name": bot_name, "expires_at": token["expires_at"]},
+    )
+    return envelope(token)
 
 
 @management_router.post("/users/{user_id}/workspace/reset", tags=[TAG_MANAGEMENT_USERS], summary="Reset a user's workspace sessions")
@@ -2178,6 +2330,97 @@ async def list_audit_logs(
     return envelope(logs, meta=_page_meta(logs, "timestamp"))
 
 
+@management_router.get("/traces", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List trace roots")
+async def list_traces(
+    limit: int = Query(default=50, ge=1, le=200),
+    after: Optional[int] = None,
+    component: Optional[str] = None,
+    request_id: Optional[str] = None,
+    status: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    search: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+):
+    since_ms = _parse_time_filter(since)
+    until_ms = _parse_time_filter(until)
+    rows = db_manager.list_traces(
+        limit=limit,
+        after=after,
+        component=component,
+        request_id=request_id,
+        status=status,
+        trace_id=trace_id,
+        search=search,
+        since=since_ms,
+        until=until_ms,
+    )
+    return envelope(rows, meta=_page_meta(rows, "started_at"))
+
+
+@management_router.get("/traces/{trace_id}", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get one trace")
+async def get_trace(trace_id: str):
+    rows = db_manager.get_trace_events(trace_id)
+    if not rows:
+        raise HTTPException(404, "Trace not found")
+    return envelope({"trace_id": trace_id, "events": rows})
+
+
+@management_router.get("/logs", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List runtime logs")
+async def list_runtime_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    after: Optional[str] = None,
+    level: Optional[str] = None,
+    component: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    search: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+):
+    since_ms = _parse_time_filter(since)
+    until_ms = _parse_time_filter(until)
+    rows = _runtime_log_store().list_logs(
+        limit=limit,
+        after=after,
+        level=level,
+        component=component,
+        trace_id=trace_id,
+        request_id=request_id,
+        search=search,
+        since=since_ms,
+        until=until_ms,
+    )
+    return envelope(rows, meta=_page_meta(rows, "timestamp"))
+
+
+@management_router.post("/observability/prune", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Prune old observability shards")
+async def prune_observability(current_operator: dict = Depends(get_current_operator)):
+    runtime_result = {"files_deleted": 0, "files_rewritten": 0, "records_deleted": 0}
+    if settings.log_retention_days > 0:
+        cutoff_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000) - settings.log_retention_days * 24 * 60 * 60 * 1000
+        runtime_result = _runtime_log_store().prune_older_than(cutoff_ms)
+    trace_result = db_manager.prune_traces(settings.telemetry_trace_retention_days)
+    payload = {
+        "runtime_logs": {
+            "retention_days": settings.log_retention_days,
+            **runtime_result,
+        },
+        "traces": {
+            "retention_days": settings.telemetry_trace_retention_days,
+            **trace_result,
+        },
+    }
+    db_manager.record_audit(
+        actor=f"operator:{current_operator['id']}",
+        action="observability.pruned",
+        target_type="observability",
+        target_id="file-shards",
+        after=payload,
+    )
+    return envelope(payload)
+
+
 @management_router.get("/usage", tags=[TAG_MANAGEMENT_USAGE], summary="Get aggregated usage")
 async def get_usage():
     summary = db_manager.get_usage_summary()
@@ -2297,6 +2540,7 @@ async def get_session_usage(session_id: str):
 app.include_router(auth_router)
 app.include_router(management_router)
 app.include_router(user_router)
+app.include_router(channel_router)
 
 # --- Static Dashboard ---
 

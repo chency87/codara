@@ -24,6 +24,9 @@ import UsersPage from './pages/Users';
 import Providers from './pages/Providers';
 import Usage from './pages/Usage';
 import AuditLog from './pages/AuditLog';
+import Traces from './pages/Traces';
+import Logs from './pages/Logs';
+import Observability from './pages/Observability';
 import Playground from './pages/Playground';
 import Login from './pages/Login';
 import Workspaces from './pages/Workspaces';
@@ -136,6 +139,7 @@ function AppLayout() {
           <nav className="space-y-1">
             <SidebarItem to="/providers" icon={Cpu} label="Providers" />
             <SidebarItem to="/usage" icon={BarChart3} label="Usage Metrics" />
+            <SidebarItem to="/observability" icon={Activity} label="Observability" />
             <SidebarItem to="/audit" icon={History} label="Audit Logs" />
           </nav>
         </div>
@@ -173,6 +177,9 @@ function AppLayout() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/providers" element={<Providers />} />
           <Route path="/usage" element={<Usage />} />
+          <Route path="/observability" element={<Observability />} />
+          <Route path="/traces" element={<Traces />} />
+          <Route path="/logs" element={<Logs />} />
           <Route path="/audit" element={<AuditLog />} />
         </Routes>
       </main>

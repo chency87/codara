@@ -12,6 +12,7 @@ from codara.adapters.opencode import OpenCodeAdapter
 from codara.config import Settings, get_settings
 from codara.core.models import AuthType, ProviderType
 from codara.database.manager import DatabaseManager
+from codara.telemetry import record_event, start_span
 
 logger = logging.getLogger(__name__)
 
@@ -79,21 +80,34 @@ class UsageMonitor:
         concurrency = max(1, int(max_concurrency or 5))
         sem = asyncio.Semaphore(concurrency)
         accounts = self.db.get_all_accounts()
+        async with start_span(
+            "usage_monitor.sync_all_accounts",
+            component="usage.monitor",
+            db=self.db,
+            attributes={"account_count": len(accounts), "max_concurrency": concurrency},
+        ):
+            async def _sync_one(account):
+                async with sem:
+                    try:
+                        await self._sync_with_adapter(account, account.provider)
+                    except Exception as exc:
+                        self._record_event(
+                            "usage.sync.failed",
+                            account.account_id,
+                            before={"provider": account.provider.value, "status": account.status},
+                            after={"error": str(exc)},
+                        )
+                        record_event(
+                            "usage.sync.failed",
+                            component="usage.monitor",
+                            db=self.db,
+                            level="ERROR",
+                            status="error",
+                            attributes={"account_id": account.account_id, "provider": account.provider.value, "error": str(exc)},
+                        )
+                        logger.warning("Failed to sync usage for %s: %s", account.account_id, exc)
 
-        async def _sync_one(account):
-            async with sem:
-                try:
-                    await self._sync_with_adapter(account, account.provider)
-                except Exception as exc:
-                    self._record_event(
-                        "usage.sync.failed",
-                        account.account_id,
-                        before={"provider": account.provider.value, "status": account.status},
-                        after={"error": str(exc)},
-                    )
-                    logger.warning("Failed to sync usage for %s: %s", account.account_id, exc)
-
-        await asyncio.gather(*(_sync_one(a) for a in accounts))
+            await asyncio.gather(*(_sync_one(a) for a in accounts))
 
     async def _sync_codex(self, account):
         await self._sync_with_adapter(account, ProviderType.CODEX)
@@ -105,6 +119,12 @@ class UsageMonitor:
         adapter = self.adapters.get(provider)
         if not adapter:
             return
+        record_event(
+            "usage.fetch.started",
+            component="usage.monitor",
+            db=self.db,
+            attributes={"account_id": account.account_id, "provider": provider.value, "status": account.status},
+        )
         self._record_event(
             "usage.fetch.started",
             account.account_id,
@@ -133,6 +153,14 @@ class UsageMonitor:
                 usage = await adapter.collect_usage(account, credential, self.settings)
 
         if not usage:
+            record_event(
+                "usage.fetch.failed",
+                component="usage.monitor",
+                db=self.db,
+                level="WARNING",
+                status="error",
+                attributes={"account_id": account.account_id, "provider": provider.value, "error": "adapter returned no data"},
+            )
             self._record_event(
                 "usage.fetch.failed",
                 account.account_id,
@@ -143,6 +171,18 @@ class UsageMonitor:
             return
         self._apply_usage_result(account, usage)
         current = self.db.get_account(account.account_id) or account
+        record_event(
+            "usage.fetch.succeeded",
+            component="usage.monitor",
+            db=self.db,
+            status="ok",
+            attributes={
+                "account_id": account.account_id,
+                "provider": provider.value,
+                "status": current.status,
+                **(self._usage_summary(usage) or {}),
+            },
+        )
         self._record_event(
             "usage.fetch.succeeded",
             account.account_id,
