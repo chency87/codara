@@ -15,6 +15,10 @@ on:
         description: "OpenCode CLI npm package spec"
         required: false
         default: "opencode-ai@latest"
+      pnpm_package:
+        description: "pnpm npm package spec"
+        required: false
+        default: "pnpm@latest"
   push:
     branches:
       - main
@@ -51,6 +55,7 @@ env:
   CODEX_CLI_PACKAGE: ${{ github.event.inputs.codex_cli_package || '@openai/codex@latest' }}
   GEMINI_CLI_PACKAGE: ${{ github.event.inputs.gemini_cli_package || '@google/gemini-cli@latest' }}
   OPENCODE_CLI_PACKAGE: ${{ github.event.inputs.opencode_cli_package || 'opencode-ai@latest' }}
+  PNPM_PACKAGE: ${{ github.event.inputs.pnpm_package || 'pnpm@latest' }}
 
 jobs:
   docker:
@@ -103,6 +108,7 @@ jobs:
             CODEX_CLI_PACKAGE=${{ env.CODEX_CLI_PACKAGE }}
             GEMINI_CLI_PACKAGE=${{ env.GEMINI_CLI_PACKAGE }}
             OPENCODE_CLI_PACKAGE=${{ env.OPENCODE_CLI_PACKAGE }}
+            PNPM_PACKAGE=${{ env.PNPM_PACKAGE }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

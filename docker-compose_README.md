@@ -79,6 +79,7 @@ By default compose builds with `@latest` packages:
 CODEX_CLI_PACKAGE=@openai/codex@latest
 GEMINI_CLI_PACKAGE=@google/gemini-cli@latest
 OPENCODE_CLI_PACKAGE=opencode-ai@latest
+PNPM_PACKAGE=pnpm@latest
 ```
 
 Pin these values in `.env` for reproducible production images. Keep provider auth inside Codara-managed credentials or isolated homes under `/workspaces/isolated_envs`; do not mount host auth files into `/root`, because the container runs as the non-root `codara` user.

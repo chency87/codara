@@ -48,7 +48,7 @@ FROM python:3.12-slim AS runtime
 ARG CODEX_CLI_PACKAGE="@openai/codex@latest"
 ARG GEMINI_CLI_PACKAGE="@google/gemini-cli@latest"
 ARG OPENCODE_CLI_PACKAGE="opencode-ai@latest"
-ARG PNPM_VERSION="latest"
+ARG PNPM_PACKAGE="pnpm@latest"
 ARG USERNAME="codara"
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -126,7 +126,6 @@ WORKDIR /app
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
 COPY --from=node-runtime /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node-runtime /usr/local/bin/corepack /usr/local/bin/corepack
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/.venv /app/.venv
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/src /app/src
@@ -137,8 +136,7 @@ RUN npm install -g \
         "${CODEX_CLI_PACKAGE}" \
         "${GEMINI_CLI_PACKAGE}" \
         "${OPENCODE_CLI_PACKAGE}" \
-    && corepack enable \
-    && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+        "${PNPM_PACKAGE}" \
     && npm cache clean --force \
     && node --version \
     && npm --version \

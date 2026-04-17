@@ -7,6 +7,7 @@ services:
         CODEX_CLI_PACKAGE: ${CODEX_CLI_PACKAGE:-@openai/codex@latest}
         GEMINI_CLI_PACKAGE: ${GEMINI_CLI_PACKAGE:-@google/gemini-cli@latest}
         OPENCODE_CLI_PACKAGE: ${OPENCODE_CLI_PACKAGE:-opencode-ai@latest}
+        PNPM_PACKAGE: ${PNPM_PACKAGE:-pnpm@latest}
     image: ${CODARA_IMAGE:-codara:latest}
     container_name: ${CODARA_CONTAINER_NAME:-codara}
     restart: unless-stopped
