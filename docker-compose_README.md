@@ -80,6 +80,8 @@ CODEX_CLI_PACKAGE=@openai/codex@latest
 GEMINI_CLI_PACKAGE=@google/gemini-cli@latest
 OPENCODE_CLI_PACKAGE=opencode-ai@latest
 PNPM_PACKAGE=pnpm@latest
+NODE_VERSION=24
+NVM_VERSION=0.40.3
 ```
 
 Pin these values in `.env` for reproducible production images. Keep provider auth inside Codara-managed credentials or isolated homes under `/workspaces/isolated_envs`; do not mount host auth files into `/root`, because the container runs as the non-root `codara` user.
