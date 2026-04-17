@@ -42,12 +42,20 @@ _FIELD_ENV_MAP = {
     "codex_usage_endpoints": "UAG_CODEX_USAGE_ENDPOINTS",
     "codex_oauth_url": "UAG_CODEX_OAUTH_URL",
     "codex_default_model": "UAG_CODEX_DEFAULT_MODEL",
+    "codex_stall_timeout_seconds": "UAG_CODEX_STALL_TIMEOUT_SECONDS",
     "gemini_billing_api_key": "UAG_GEMINI_BILLING_API_KEY",
     "gemini_usage_endpoints": "UAG_GEMINI_USAGE_ENDPOINTS",
     "gemini_default_model": "UAG_GEMINI_DEFAULT_MODEL",
+    "gemini_stall_timeout_seconds": "UAG_GEMINI_STALL_TIMEOUT_SECONDS",
     "opencode_default_model": "UAG_OPENCODE_DEFAULT_MODEL",
+    "opencode_stall_timeout_seconds": "UAG_OPENCODE_STALL_TIMEOUT_SECONDS",
     "gemini_base_url": "GEMINI_BASE_URL",
     "isolated_envs_root": "UAG_ISOLATED_ENVS_ROOT",
+    "release_check_enabled": "UAG_RELEASE_CHECK_ENABLED",
+    "release_repository": "UAG_RELEASE_REPOSITORY",
+    "release_api_base_url": "UAG_RELEASE_API_BASE_URL",
+    "release_check_timeout_seconds": "UAG_RELEASE_CHECK_TIMEOUT_SECONDS",
+    "release_check_cache_ttl_seconds": "UAG_RELEASE_CHECK_CACHE_TTL_SECONDS",
     "redis_url": "REDIS_URL",
 }
 
@@ -79,11 +87,19 @@ _CONFIG_BLOCK_FIELD_MAP: Dict[Tuple[str, ...], str] = {
     ("providers", "codex", "usage_endpoints"): "codex_usage_endpoints",
     ("providers", "codex", "oauth_url"): "codex_oauth_url",
     ("providers", "codex", "default_model"): "codex_default_model",
+    ("providers", "codex", "stall_timeout_seconds"): "codex_stall_timeout_seconds",
     ("providers", "gemini", "billing_api_key"): "gemini_billing_api_key",
     ("providers", "gemini", "usage_endpoints"): "gemini_usage_endpoints",
     ("providers", "gemini", "default_model"): "gemini_default_model",
+    ("providers", "gemini", "stall_timeout_seconds"): "gemini_stall_timeout_seconds",
     ("providers", "gemini", "base_url"): "gemini_base_url",
     ("providers", "opencode", "default_model"): "opencode_default_model",
+    ("providers", "opencode", "stall_timeout_seconds"): "opencode_stall_timeout_seconds",
+    ("release", "enabled"): "release_check_enabled",
+    ("release", "repository"): "release_repository",
+    ("release", "api_base_url"): "release_api_base_url",
+    ("release", "check_timeout_seconds"): "release_check_timeout_seconds",
+    ("release", "check_cache_ttl_seconds"): "release_check_cache_ttl_seconds",
     ("infra", "redis_url"): "redis_url",
     ("telemetry", "enabled"): "telemetry_enabled",
     ("telemetry", "persist_traces"): "telemetry_persist_traces",
@@ -176,19 +192,29 @@ class Settings(BaseSettings):
     )
     codex_oauth_url: str = Field(default="https://auth0.openai.com/oauth/token", validation_alias="UAG_CODEX_OAUTH_URL")
     codex_default_model: str = Field(default="gpt-5-codex", validation_alias="UAG_CODEX_DEFAULT_MODEL")
+    codex_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_CODEX_STALL_TIMEOUT_SECONDS")
     gemini_billing_api_key: Optional[str] = Field(default=None, validation_alias="UAG_GEMINI_BILLING_API_KEY")
     gemini_usage_endpoints: str = Field(
         default="https://gemini.google.com/backend-api/wham/usage,https://aistudio.google.com/backend-api/wham/usage,https://api.gemini.ai/v1/usage",
         validation_alias="UAG_GEMINI_USAGE_ENDPOINTS",
     )
     gemini_default_model: str = Field(default="gemini-2.5-pro", validation_alias="UAG_GEMINI_DEFAULT_MODEL")
-    opencode_default_model: str = Field(default="openai/gpt-5", validation_alias="UAG_OPENCODE_DEFAULT_MODEL")
+    gemini_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_GEMINI_STALL_TIMEOUT_SECONDS")
+    opencode_default_model: str = Field(default="opencode/big-pickle", validation_alias="UAG_OPENCODE_DEFAULT_MODEL")
+    opencode_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_OPENCODE_STALL_TIMEOUT_SECONDS")
 
     # Provider-specific settings
     gemini_base_url: str = Field(default="https://api.gemini.ai", validation_alias="GEMINI_BASE_URL")
 
     # Redis (for production deployment)
     redis_url: Optional[str] = Field(default=None, validation_alias="REDIS_URL")
+
+    # Release/update checks
+    release_check_enabled: bool = Field(default=False, validation_alias="UAG_RELEASE_CHECK_ENABLED")
+    release_repository: Optional[str] = Field(default=None, validation_alias="UAG_RELEASE_REPOSITORY")
+    release_api_base_url: str = Field(default="https://api.github.com", validation_alias="UAG_RELEASE_API_BASE_URL")
+    release_check_timeout_seconds: int = Field(default=3, validation_alias="UAG_RELEASE_CHECK_TIMEOUT_SECONDS")
+    release_check_cache_ttl_seconds: int = Field(default=6 * 60 * 60, validation_alias="UAG_RELEASE_CHECK_CACHE_TTL_SECONDS")
 
     # Telemetry
     telemetry_enabled: bool = Field(default=True)
@@ -289,14 +315,14 @@ def _flatten_config(data: Dict[str, Any]) -> Dict[str, Any]:
 def _resolve_path_like_settings(config_values: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
     resolved = dict(config_values)
     base_dir = config_path.parent.resolve()
-    for key in ("database_path", "workspaces_root", "isolated_envs_root", "logs_root", "telemetry_trace_root", "runtime_log_root"):
+    for key in ("database_path", "workspaces_root", "isolated_envs_root", "logs_root"):
         value = resolved.get(key)
         if not isinstance(value, str) or not value.strip():
             continue
         candidate = Path(value).expanduser()
         if not candidate.is_absolute():
             resolved[key] = str((base_dir / candidate).resolve())
-    for key in ("codex_billing_api_key", "gemini_billing_api_key", "redis_url"):
+    for key in ("codex_billing_api_key", "gemini_billing_api_key", "redis_url", "release_repository"):
         if resolved.get(key) == "":
             resolved[key] = None
     return resolved

@@ -39,11 +39,39 @@ codara serve --build-ui
 
 If you change files under `ui/src`, rebuild the dashboard before using the served `/dashboard` bundle. `codara serve` warns when the checked-in `ui/dist` build is older than the current UI source tree.
 
+The gateway serves dashboard client-side routes with a history fallback. After `ui/dist` exists, refreshing `/dashboard/workspaces`, `/dashboard/accounts`, or another dashboard page returns the React shell instead of a FastAPI JSON 404.
+
+Check the installed framework version locally:
+
+```bash
+codara version
+codara version --check
+```
+
+`codara version --check` uses the GitHub latest-release API only when `[release].enabled = true` and `[release].repository` is configured in `codara.toml`.
+
 Runtime defaults come from [`codara.toml`](codara.toml), which is organized into blocks such as `[server]`, `[workspace]`, `[providers.*]`, and `[channels.*]`. Environment variables still override config values, including:
 
 - `API_TOKEN` for operator login (`UAG_MGMT_SECRET` remains a supported fallback alias)
 - `UAG_WORKSPACES_ROOT` for provisioned user workspaces
+- `UAG_CODEX_STALL_TIMEOUT_SECONDS`, `UAG_GEMINI_STALL_TIMEOUT_SECONDS`, and `UAG_OPENCODE_STALL_TIMEOUT_SECONDS` for killing provider CLIs that are alive but no longer producing stdout/stderr progress
 - `UAG_CODEX_AUTH_PATH`, `UAG_GEMINI_AUTH_PATH`, `UAG_OPENCODE_AUTH_PATH` for CLI auth materialization targets
+- `UAG_RELEASE_REPOSITORY` and `UAG_RELEASE_CHECK_ENABLED` for GitHub release update checks
+
+Telegram channels support both:
+- `receive_mode = "webhook"` for public HTTPS webhook delivery
+- `receive_mode = "polling"` for long-polling via Telegram `getUpdates` when you do not have a webhook endpoint
+
+In polling mode, Codara disables any existing Telegram webhook for the bot at startup and stores the per-bot update offset locally so polling can resume after restarts.
+
+Linked Telegram users can create and switch project workspaces directly:
+
+```text
+/projects
+/project_create news-pulse python
+/project_info news-pulse
+/project news-pulse
+```
 
 ## Register accounts
 
@@ -71,7 +99,31 @@ codara account add \
   --credential-file /tmp/codex.key
 ```
 
-When an operator selects an account as CLI-primary, UAG materializes that credential into the provider auth path used by the local CLI runtime. Automatic routing still falls back to another ready account when the primary one is expired, cooling down, or close to depletion.
+When an operator selects a Codex account as CLI-primary, Codara marks it as the preferred managed identity for Codex routing. The managed credential stays in the vault and is injected into the isolated Codex runtime home during execution instead of overwriting the host machine's `~/.codex/auth.json`. Automatic routing still falls back to another ready account when the primary one is expired, cooling down, or close to depletion.
+
+## Create projects
+
+`project` is the user-facing name for a managed workspace. Internally, projects still use the workspace safe-zone, session binding, diff tracking, and reset/delete behavior.
+
+```bash
+codara project create news-pulse
+codara project create agent-lab --template python --provider codex
+codara project list
+codara project info news-pulse
+```
+
+The default template creates:
+
+```text
+README.md
+docs/
+src/
+scripts/
+tests/
+.codara/project.toml
+```
+
+Available templates are `default`, `python`, `docs`, and `empty`.
 
 ## Operator dashboard and management API
 
@@ -84,6 +136,9 @@ The dashboard is a thin client over `/management/v1/*`. Useful endpoints:
 
 - `POST /management/v1/auth/token`
 - `GET /management/v1/overview`
+- `GET /management/v1/version?check_updates=true`
+- `GET /management/v1/projects`
+- `POST /management/v1/projects`
 - `GET /management/v1/workspaces`
 - `GET /management/v1/accounts`
 - `GET /management/v1/traces`
@@ -152,7 +207,7 @@ For user-key requests:
 - `workspace_root` is injected by the gateway from the provisioned workspace and should usually be omitted.
 - `workspace_id` is only needed when the user wants multiple isolated sub-workspaces; otherwise the default workspace is used.
 - `manual_mode` is an advanced runtime control and can usually be omitted.
-- `model` may be either an explicit provider runtime model (for example `gpt-5-codex`, `gemini-2.5-pro`, or `openai/gpt-5`) or a `uag-*` alias; aliases resolve to the configured provider default model from `codara.toml`.
+- `model` may be either an explicit provider runtime model (for example `gpt-5-codex`, `gemini-2.5-pro`, or `opencode/big-pickle`) or a `uag-*` alias; aliases resolve to the configured provider default model from `codara.toml`.
 - `GET /v1/user/providers/models` returns the current provider model listings; operators can query the same inventory via `GET /management/v1/providers/models`.
 
 ### Response extensions
@@ -178,6 +233,8 @@ cd ui && npm run build
 For design details, start with:
 
 - [`docs/index.md`](docs/index.md)
+- [`docs/api-dashboard.md`](docs/api-dashboard.md)
+- [`docs/channel-design.md`](docs/channel-design.md)
+- [`docs/architecture.md`](docs/architecture.md)
 - [`docs/accountpool.md`](docs/accountpool.md)
 - [`docs/token_usage.md`](docs/token_usage.md)
-- [`docs/api-dashboard.md`](docs/api-dashboard.md)

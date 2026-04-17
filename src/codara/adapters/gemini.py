@@ -13,18 +13,29 @@ import httpx
 
 from codara.core.models import Session, Message, TurnResult
 from codara.adapters.base import ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin
+from codara.adapters.cli_monitor import communicate_with_stall_detection, terminate_process
 from codara.database.manager import DatabaseManager
-from codara.config import get_provider_default_model
+from codara.config import get_provider_default_model, get_settings
 from codara.core.models import ProviderType
 
 logger = logging.getLogger(__name__)
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 class GeminiAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
-    def __init__(self, db_manager: Optional[DatabaseManager] = None, base_url: Optional[str] = None):
+    def __init__(
+        self,
+        db_manager: Optional[DatabaseManager] = None,
+        base_url: Optional[str] = None,
+        stall_timeout_seconds: Optional[int] = None,
+    ):
         ConfigIsolationMixin.__init__(self, db_manager)
         CliRuntimeMixin.__init__(self)
         self.base_url = base_url or os.getenv("GEMINI_BASE_URL", "https://api.gemini.ai")
+        self.stall_timeout_seconds = (
+            int(stall_timeout_seconds)
+            if stall_timeout_seconds is not None
+            else int(get_settings().gemini_stall_timeout_seconds)
+        )
 
     async def send_turn(self, session: Session, messages: List[Message], provider_model: str) -> TurnResult:
         self._resolve_executable("gemini")
@@ -46,7 +57,12 @@ class GeminiAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
                     cwd=session.cwd_path,
                 )
 
-                stdout, stderr = await proc.communicate(prompt.encode("utf-8"))
+                stdout, stderr = await communicate_with_stall_detection(
+                    proc,
+                    input_data=prompt.encode("utf-8"),
+                    stall_timeout_seconds=self.stall_timeout_seconds,
+                    process_label="Gemini CLI",
+                )
                 stderr_output = self._sanitize_exec_stderr(stderr.decode())
                 if proc.returncode != 0:
                     lowered = stderr_output.lower()
@@ -74,8 +90,7 @@ class GeminiAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
                 raise RuntimeError("Gemini CLI is not installed on the local system") from exc
             finally:
                 if proc is not None and proc.returncode is None:
-                    proc.terminate()
-                    await proc.wait()
+                    await terminate_process(proc)
         raise RuntimeError("Gemini CLI exec failed: unable to recover from invalid session state")
 
     async def list_models(self, settings: Any) -> dict[str, Any]:
@@ -517,6 +532,7 @@ class GeminiAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
         command = [
             gemini_bin,
             "--yolo",
+            "--sandbox=false",
             "--output-format",
             "json",
             "--model",

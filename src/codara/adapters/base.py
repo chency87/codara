@@ -181,6 +181,40 @@ class ConfigIsolationMixin:
         if normalized is not None:
             self._write_text_if_changed(destination, normalized)
 
+    def sync_isolated_provider_credential(self, provider_name: str, account_id: str, home_path: str) -> bool:
+        if not self.pool:
+            return False
+        filename = "oauth_creds.json" if provider_name == "gemini" else "auth.json"
+        source = Path(home_path) / f".{provider_name}" / filename
+        if not source.exists() or not source.is_file():
+            return False
+        try:
+            updated = source.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        if not updated.strip():
+            return False
+
+        current = self.pool.get_credential(account_id)
+        if current == updated:
+            return False
+
+        credential_to_save = updated
+        if provider_name == "codex":
+            env: dict[str, str] = {}
+            try:
+                normalized = self._normalize_codex_credential(account_id, updated, env)
+            except RuntimeError:
+                logger.warning("Skipping invalid isolated Codex auth sync-back for account %s", account_id)
+                return False
+            if normalized is None:
+                return False
+            credential_to_save = normalized
+            if current == credential_to_save:
+                return False
+
+        return self.pool.update_credential(account_id, credential_to_save) is not None
+
     def _normalize_codex_credential(
         self,
         account_id: str,

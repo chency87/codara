@@ -1,8 +1,8 @@
 # Unified Agent Gateway (UAG) - Technical Documentation
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Status:** Engineering Final  
-**Last Updated:** 2026-04-14
+**Last Updated:** 2026-04-16
 
 ---
 
@@ -955,12 +955,15 @@ lock_timeout = 300
 usage_endpoints = "https://chatgpt.com/backend-api/wham/usage,https://api.openai.com/dashboard/codex/usage"
 oauth_url = "https://auth0.openai.com/oauth/token"
 default_model = "gpt-5-codex"
+stall_timeout_seconds = 600
 
 [providers.gemini]
 default_model = "gemini-2.5-pro"
+stall_timeout_seconds = 600
 
 [providers.opencode]
-default_model = "openai/gpt-5"
+default_model = "opencode/big-pickle"
+stall_timeout_seconds = 600
 ```
 
 ### 8.3 Scaling Strategy

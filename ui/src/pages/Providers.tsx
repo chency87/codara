@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Activity, Cpu, ShieldCheck, Wallet, AlertTriangle, Bot } from 'lucide-react';
 import type { ProviderHealthRecord } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const statusClass = (status?: string) => {
   if (status === 'ok') return 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
@@ -104,7 +105,7 @@ const Providers = () => {
   const { data: stats, isLoading } = useQuery<ProviderHealthRecord[]>({
     queryKey: ['provider-stats'],
     queryFn: async () => {
-      const resp = await axios.get('/management/v1/health/providers');
+      const resp = await axios.get('/management/v1/health/providers', { headers: dashboardPollHeaders });
       return resp.data.data || [];
     },
     refetchInterval: 30000,

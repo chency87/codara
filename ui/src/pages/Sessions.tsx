@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Trash2, Terminal, FolderCode, Hash, X, History, Database, Cpu, ChevronRight, Copy, Check } from 'lucide-react';
 import CursorPagination from '../components/CursorPagination';
 import type { ApiEnvelope, SessionDetail, SessionListItem, SessionTurn } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const PAGE_SIZE = 25;
 
@@ -124,6 +125,7 @@ const Sessions = () => {
     queryKey: ['sessions', cursor],
     queryFn: async () => {
       const resp = await axios.get('/management/v1/sessions', {
+        headers: dashboardPollHeaders,
         params: { limit: PAGE_SIZE, after: cursor || undefined },
       });
       return resp.data;

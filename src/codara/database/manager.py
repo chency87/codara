@@ -334,6 +334,16 @@ class DatabaseManager:
                     consumed_at      INTEGER
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS channel_runtime_state (
+                    channel          TEXT        NOT NULL,
+                    bot_name         TEXT        NOT NULL DEFAULT '',
+                    state_key        TEXT        NOT NULL,
+                    state_value      TEXT,
+                    updated_at       INTEGER     NOT NULL,
+                    PRIMARY KEY (channel, bot_name, state_key)
+                )
+            """)
             self._ensure_column(conn, "turns", "user_id", "TEXT")
             self._ensure_column(conn, "sessions", "user_id", "TEXT")
             self._ensure_column(conn, "sessions", "api_key_id", "TEXT")
@@ -360,6 +370,7 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_conversations_user ON channel_conversations(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_tokens_user ON channel_link_tokens(user_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_tokens_channel ON channel_link_tokens(channel)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_runtime_state_channel ON channel_runtime_state(channel, bot_name)")
             self._ensure_column(conn, "channel_user_links", "bot_name", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "channel_conversations", "bot_name", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "channel_link_tokens", "bot_name", "TEXT NOT NULL DEFAULT ''")
@@ -1706,6 +1717,52 @@ class DatabaseManager:
             )
             conn.commit()
             return dict(row)
+
+    def get_channel_runtime_state(self, channel: str, bot_name: str, state_key: str) -> Optional[dict]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM channel_runtime_state
+                WHERE channel = ? AND bot_name = ? AND state_key = ?
+                """,
+                (channel, bot_name, state_key),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def save_channel_runtime_state(self, *, channel: str, bot_name: str, state_key: str, state_value: Optional[str]) -> dict:
+        now = self._now_ms()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO channel_runtime_state
+                (channel, bot_name, state_key, state_value, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(channel, bot_name, state_key) DO UPDATE SET
+                    state_value = excluded.state_value,
+                    updated_at = excluded.updated_at
+                """,
+                (channel, bot_name, state_key, state_value, now),
+            )
+            conn.commit()
+        return self.get_channel_runtime_state(channel, bot_name, state_key) or {}
+
+    def get_channel_polling_offset(self, channel: str, bot_name: str) -> int:
+        row = self.get_channel_runtime_state(channel, bot_name, "polling_offset")
+        if not row or row.get("state_value") in (None, ""):
+            return 0
+        try:
+            return int(str(row["state_value"]))
+        except (TypeError, ValueError):
+            return 0
+
+    def save_channel_polling_offset(self, channel: str, bot_name: str, offset: int) -> int:
+        self.save_channel_runtime_state(
+            channel=channel,
+            bot_name=bot_name,
+            state_key="polling_offset",
+            state_value=str(int(offset)),
+        )
+        return int(offset)
 
     def get_available_account(self, provider: ProviderType) -> Optional[Account]:
         now = int(datetime.now().timestamp())

@@ -17,37 +17,26 @@ Here is the implementation specification for the Automated Identity Refresh (AIR
 
 ## 1. The Identity State Machine
 
-Each account in the AccountPool should follow a specific state lifecycle:
+> **Note:** This section describes the design model that informed the implementation. The actual implementation uses different patterns (see `src/codara/accounts/pool.py`).
 
-- `ACTIVE`: Token is valid and has remaining quota.
-- `EXPIRED`: Access token is invalid, but refresh token is available.
-- `REFRESHING`: A background lock is held to prevent multiple threads from refreshing the same account.
-- `COOLDOWN`: The account hit a `429` rate limit and is temporarily sidelined.
+The AccountPool uses a simpler state model than originally designed:
 
-## 2. Automated Token Refresh Logic
+- `ACTIVE` / `READY`: Token is valid and has remaining quota.
+- `COOLDOWN`: Account hit a `429` rate limit and is temporarily sidelined.
+- `_uses_subscription_quota()` distinguishes between WHAM/OAuth (subscription-based) vs API-key accounts.
+- Token refresh is handled by credential extraction at use time with expiry inference from stored credentials.
 
-The utility must handle both pre-emptive (before expiry) and reactive (on `401 Unauthorized`) refreshes.
+## 2. Implementation Reference
 
-Identity Data Structure
+For the actual implementation, see `src/codara/accounts/pool.py`:
 
-Python
-from pydantic import BaseModel
-from datetime import datetime, timedelta
+- `acquire_account()` - main entry point for getting an active account
+- `_eligible_accounts()` - filters by status and cooldown
+- `_has_healthy_headroom()` - checks 5% minimum threshold
+- `mark_cooldown()` - handles 429 responses with 60s backoff
+- `_headroom_pct()` - calculates remaining quota percentage
 
-class Identity(BaseModel):
-    account_id: str
-    access_token: str
-    refresh_token: str
-    expires_at: datetime
-    status: str = "ACTIVE"
-    
-    def is_expired(self, buffer_minutes: int = 5):
-        # Trigger refresh 5 minutes before actual expiry to prevent race conditions
-        return datetime.now() + timedelta(minutes=buffer_minutes) >= self.expires_at
-The Refresh Utility (AIR_Service)Pythonimport requests
-import time
-
-class TokenRefreshService:
+For credential handling, see `src/codara/accounts/vault.py` for the vault-backed persistence layer.
     def __init__(self):
         # OpenAI's internal OAuth endpoint used by Codex CLI
         self.oauth_url = "https://auth0.openai.com/oauth/token"
@@ -57,43 +46,19 @@ class TokenRefreshService:
         if identity.status == "REFRESHING":
             return False
 
-        identity.status = "REFRESHING"
-        payload = {
-            "grant_type": "refresh_token",
-            "client_id": self.client_id,
-            "refresh_token": identity.refresh_token
-        }
+## 3. Actual Integration (pool.py)
 
-        try:
-            response = requests.post(self.oauth_url, json=payload, timeout=10)
-            response.raise_for_status()
-            
-            new_data = response.json()
-            identity.access_token = new_data["access_token"]
-            # Some providers rotate the refresh_token too
-            identity.refresh_token = new_data.get("refresh_token", identity.refresh_token)
-            identity.expires_at = datetime.now() + timedelta(seconds=new_data["expires_in"])
-            identity.status = "ACTIVE"
-            
-            # Persist back to the UAG Session Store/auth.json
-            self._persist_identity(identity)
-            return True
+The AccountPool integrates with the Orchestrator through these methods:
 
-        except Exception as e:
-            identity.status = "BROKEN"
-            print(f"CRITICAL: Failed to refresh account {identity.account_id}: {e}")
-            return False
-
-    def _persist_identity(self, identity: Identity):
-        # Logic to sync back to disk (auth.json) or the UAG SQLite Registry
-        pass
-## 3. Integration with the Orchestrator
-
-To ensure zero-downtime execution, the Orchestrator should interact with the AccountPool using a safe-check wrapper before every agent turn.
-
-| Scenario | Orchestrator Action | Result |
+| Scenario | Pool Action | Result |
 | --- | --- | --- |
-| Normal | Token is valid. | Request proceeds immediately. |
-| Near-expiry | Trigger `AIR_Service` in the background. | Request proceeds; next request gets the refreshed token. |
-| `401 Unauthorized` | Block current thread, run `refresh_access_token`. | Request is retried once with the new token. |
-| `429 Rate Limit` | Set status to `COOLDOWN`. | Request is routed to a different identity in the pool. |
+| Normal | Account has healthy headroom (>5%). | Use current CLI-primary account, proceed. |
+| Low headroom | `< 5%` remaining quota. | Promote next healthiest account to CLI-primary. |
+| `401 Unauthorized` | Account selection fails. | Retry with next eligible account. |
+| `429 Rate Limit` | `mark_429()` called. | Account status set to `cooldown` for 60s, request routed to next account. |
+
+See `src/codara/accounts/pool.py` for the actual implementation of:
+- `acquire_account()` - main selection logic
+- `mark_429()` - rate limit handling  
+- `release_account()` - usage tracking after turn completion
+- `register_account()` - new account credential ingestion with vault encryption

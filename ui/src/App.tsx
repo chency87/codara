@@ -31,6 +31,7 @@ import Playground from './pages/Playground';
 import Login from './pages/Login';
 import Workspaces from './pages/Workspaces';
 import type { HealthStatusPayload } from './types/api';
+import { dashboardPollHeaders } from './api/dashboardPoll';
 
 // Axios interceptor for auth
 axios.interceptors.request.use(config => {
@@ -87,7 +88,7 @@ function AppLayout() {
   const navigate = useNavigate();
   const { data: health } = useQuery<HealthStatusPayload>({
     queryKey: ['sidebar-health'],
-    queryFn: async () => (await axios.get('/management/v1/health')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/health', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 

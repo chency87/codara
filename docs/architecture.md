@@ -1,37 +1,104 @@
-# UAG Architecture Detail
+# Codara Architecture Map
 
-This document explains the internal runtime engine of the Unified Agent Gateway.
+This document is a concise map of the live component boundaries. Use [index.md](./index.md) for the fuller system guide.
 
-## 1. Request Lifecycle
+## 1. Component Map
 
-Every request follows a canonical flow:
+```text
+Ingress
+  ├─ /v1/chat/completions
+  ├─ /management/v1/*
+  ├─ /v1/user/*
+  └─ /channels/telegram/{bot_name}/webhook or polling
 
-1.  **Gateway Ingress**: Validates `uag_options` and checks auth.
-2.  **Session Lookup**: Resumes existing session state from the `SessionRegistry` (SQLite).
-3.  **Account Selection**: Fetches a rate-limit-aware account from the `AccountPool`.
-4.  **Orchestrator Dispatch**: Serializes requests for the same session and gates global concurrency via a semaphore.
-5.  **Workspace Snapshot**: Captures file system state (git status or file hashes).
-6.  **CLI Execution**: Spawns the provider adapter (e.g., Codex) as a subprocess.
-7.  **Workspace Diff**: Compares post-execution state with the snapshot to generate a unified diff.
-8.  **State Persistence**: Updates the `backend_id` and session timestamps in the registry.
+Gateway Layer
+  ├─ auth and token validation
+  ├─ request normalization
+  ├─ management response shaping
+  └─ dashboard static asset serving
 
-## 2. Core Components
+Shared Services
+  ├─ InferenceService
+  ├─ ChannelService
+  └─ UsageMonitor
 
-### Orchestrator Runtime
-The central supervisor managing the lifecycle of CLI-based agents. It ensures single-writer access to a workspace per session through internal locks.
+Runtime Core
+  ├─ Orchestrator
+  ├─ Provider adapters
+  └─ Workspace engine
 
-### Provider Adapters
-Adapters translate the UAG JSON payload into provider-native CLI execution flows:
-- **Codex**: local `codex exec` subprocesses with isolated credential materialization.
-- **Gemini**: local `gemini` CLI subprocesses using the host login state.
-- **OpenCode**: local `opencode run` subprocesses using the host login state.
+Persistence
+  ├─ SQLite product state
+  ├─ vault credential files
+  ├─ runtime log shards
+  └─ trace shards
+```
 
-### Workspace Engine
-Handles all file-level operations. It uses `git diff` when available and falls back to recursive file hash comparison. It also implements workspace locking via `.uag_lock` files to prevent concurrent modification by different sessions or external actors.
+## 2. Request Boundaries
 
-### SessionRegistry & AccountPool
-Persistence layers using SQLite to ensure that conversation context and provider credentials survive gateway restarts.
+### User-bound execution
 
-## 3. Session Metadata
+User-bound turns should flow through `InferenceService` so workspace binding, session naming, and attachment staging stay consistent across:
 
-- **Workspace Hash Tracking**: Stores a hash of the current workspace tree on the session row for bookkeeping and inspection. The live runtime does not yet implement a prompt-rewrite or provider cache-optimization layer on top of this value.
+- user API requests
+- dashboard playground requests
+- Telegram channel requests
+
+### Provider execution
+
+Provider adapters are intentionally local-CLI based:
+
+- Codex uses the local installed `codex` executable with a managed isolated home
+- Gemini uses the local installed `gemini` CLI with host login state
+- OpenCode uses the local installed `opencode` CLI with host login state
+
+## 3. Persistence Boundaries
+
+### SQLite owns
+
+- users
+- API keys
+- sessions
+- turns
+- accounts
+- usage summaries
+- workspace resets
+- channel links, conversations, link tokens, runtime state
+- audit log
+
+### File-backed storage owns
+
+- runtime logs under `logs/runtime/...`
+- traces under `logs/traces/...`
+
+### Vault storage owns
+
+- managed provider credential blobs under the Codara config directory
+
+## 4. Isolation Model
+
+Codara uses two different runtime-auth models:
+
+- **Managed isolated model**
+  - Codex credentials are stored in the vault and injected into an isolated runtime home
+- **System-local model**
+  - Gemini and OpenCode depend on the host machine's local CLI login
+
+That split is deliberate. Do not collapse them into one generic provider-auth model in docs or code.
+
+## 5. Dashboard Map
+
+The live dashboard routes are:
+
+- `/`
+- `/playground`
+- `/sessions`
+- `/workspaces`
+- `/accounts`
+- `/users`
+- `/providers`
+- `/usage`
+- `/observability`
+- `/audit`
+
+`/traces` and `/logs` still exist as standalone pages, but the main debugging workflow is the unified Observability page.

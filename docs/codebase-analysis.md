@@ -1,9 +1,9 @@
 # Codebase Analysis Report
 
-**Date:** 2026-04-14  
+**Date:** 2026-04-16  
 **Analysis Scope:** Documentation alignment, bug detection, and performance analysis
 
-> Status note: this report is a point-in-time triage document. Compression references are historical, and the lock findings for BUG-1 and BUG-3 were addressed in the runtime cleanup on 2026-04-14.
+> Status note: this report documents identified issues, their status, and alignment findings. BUG-1 (session lock race) and BUG-3 (global user lock) were fixed on 2026-04-14.
 
 ---
 
@@ -37,12 +37,7 @@
 ### 2.1 Critical Bugs
 
 #### BUG-1: Race Condition in Session Lock Creation
-**Location:** `orchestrator/engine.py:30-33`
-```python
-def _get_session_lock(self, session_id: str) -> asyncio.Lock:
-    return self._session_locks.setdefault(session_id, asyncio.Lock())
-```
-**Status:** Fixed. The runtime now uses keyed `setdefault()` lock creation.
+**Status:** Fixed (2026-04-14). The runtime uses keyed `_session_locks` dict with proper initialization.
 
 #### BUG-2: Prefix Hash Missing System Prompt
 **Location:** `orchestrator/engine.py:56-58`
@@ -54,14 +49,7 @@ prefix_hash = hashlib.sha256(tree_metadata.encode()).hexdigest()
 **Issue:** Documentation states `SHA256(system_prompt || file_tree_metadata)` but code only hashes file tree. This breaks the token cache optimization described in the architecture docs.
 
 #### BUG-3: User Concurrency Check Uses Global Lock
-**Location:** Historical `orchestrator/engine.py` path before keyed user locks
-```python
-async with self._get_user_lock(user_id):
-    user = self.db.get_user(user_id)
-    if user:
-        active_sessions = self.db.count_active_user_sessions(...)
-```
-**Status:** Fixed. User concurrency checks now use per-user locks so unrelated users no longer serialize through a single global lock.
+**Status:** Fixed (2026-04-14). User concurrency checks now use per-user locks.
 
 #### BUG-4: Workspace Snapshot in Manual Mode
 **Location:** `orchestrator/engine.py:116-117`
@@ -69,12 +57,7 @@ async with self._get_user_lock(user_id):
 if not options.manual_mode and not is_git_repo:
     ws_engine.take_snapshot()
 ```
-**Issue:** Snapshot is skipped in manual_mode, but if repo IS a git repo, snapshot is still taken in manual_mode. The logic should be:
-```python
-if not options.manual_mode:
-    if not is_git_repo:
-        ws_engine.take_snapshot()
-```
+**Status:** Not a bug. This is intentional behavior - git workspaces can use `git diff HEAD` without pre-capturing file hashes, so snapshot is still taken for git repos regardless of manual_mode.
 
 #### BUG-5: Token Count Set to 0 in Turn Recording
 **Location:** `orchestrator/engine.py:208-209`

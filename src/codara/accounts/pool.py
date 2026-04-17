@@ -194,9 +194,11 @@ class AccountPool:
         return stored_credential
 
     def activate_for_cli(self, account_id: str) -> Optional[str]:
-        """Copy selected account credential into provider CLI auth path."""
+        """Activate a selected account for provider runtimes when needed."""
         account = self.db.get_account(account_id)
         if not account:
+            return None
+        if account.provider == ProviderType.CODEX:
             return None
         credential = self.get_credential(account_id)
         if not credential:
@@ -208,7 +210,7 @@ class AccountPool:
         account.encrypted_credential = secrets.encrypt(raw_credential)
         self.db.save_account(account)
         self.vault.save_credential(account.provider, account.account_id, raw_credential)
-        if account.cli_primary:
+        if account.cli_primary and account.provider != ProviderType.CODEX:
             self.vault.materialize_to_cli(account.provider, raw_credential)
 
     def _normalize_credential(self, account: Account, raw_credential: str) -> str:
@@ -245,11 +247,7 @@ class AccountPool:
         return cli_credential
 
     def _should_consider_cli_auth(self, account: Account) -> bool:
-        return (
-            account.provider == ProviderType.CODEX
-            and account.auth_type == AuthType.OAUTH_SESSION
-            and account.cli_primary
-        )
+        return False
 
     def _credential_quality(self, credential: Optional[str]) -> int:
         if not credential:

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
   Activity,
@@ -13,7 +13,7 @@ import {
   TimerReset,
 } from 'lucide-react';
 import CursorPagination from '../components/CursorPagination';
-import type { ApiEnvelope, RuntimeLogRecord, TraceEvent, TraceRecord } from '../types/api';
+import type { ApiEnvelope, ObservabilityPruneResult, RuntimeLogRecord, TraceEvent, TraceRecord } from '../types/api';
 
 const TRACE_PAGE_SIZE = 25;
 const LOG_PAGE_SIZE = 50;
@@ -129,6 +129,7 @@ const TimelineRow = ({ item }: { item: TimelineItem }) => (
 );
 
 const Observability = () => {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<ObservabilityTab>('traces');
   const [search, setSearch] = useState('');
   const [component, setComponent] = useState('');
@@ -144,6 +145,31 @@ const Observability = () => {
   const [logCursorHistory, setLogCursorHistory] = useState<Array<string | null>>([]);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [selectedLogKey, setSelectedLogKey] = useState<string | null>(null);
+  const [pruneFeedback, setPruneFeedback] = useState<string | null>(null);
+
+  const pruneMutation = useMutation({
+    mutationFn: async () => {
+      const resp = await axios.post<ApiEnvelope<ObservabilityPruneResult>>('/management/v1/observability/prune');
+      return resp.data.data;
+    },
+    onMutate: () => {
+      setPruneFeedback(null);
+    },
+    onSuccess: async (result) => {
+      setPruneFeedback(
+        `Pruned ${result.runtime_logs.records_deleted} log records and ${result.traces.records_deleted} trace records.`,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['observability-traces'] }),
+        queryClient.invalidateQueries({ queryKey: ['observability-logs'] }),
+        queryClient.invalidateQueries({ queryKey: ['observability-trace-detail'] }),
+        queryClient.invalidateQueries({ queryKey: ['observability-trace-logs'] }),
+      ]);
+    },
+    onError: (error) => {
+      setPruneFeedback(getErrorMessage(error));
+    },
+  });
 
   const resetTracesPagination = () => {
     setTraceCursor(null);
@@ -346,6 +372,26 @@ const Observability = () => {
         <p className="mt-2 max-w-3xl text-slate-500 font-medium">
           Search trace roots, inspect runtime messages, and reconstruct one execution timeline from file-backed trace and log shards.
         </p>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => pruneMutation.mutate()}
+            disabled={pruneMutation.isPending}
+            className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs font-black uppercase tracking-widest text-amber-200 disabled:opacity-50"
+          >
+            <TimerReset size={14} className={pruneMutation.isPending ? 'animate-spin' : ''} />
+            Prune old shards
+          </button>
+          {pruneFeedback ? (
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${
+              pruneFeedback.startsWith('Pruned ')
+                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                : 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+            }`}>
+              {pruneFeedback}
+            </div>
+          ) : null}
+        </div>
       </header>
 
       {(traceListQuery.error || runtimeLogQuery.error || traceDetailQuery.error || correlatedLogsQuery.error) ? (

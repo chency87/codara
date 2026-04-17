@@ -8,10 +8,11 @@ from typing import Any, Iterable, Optional
 from codara.database.manager import DatabaseManager
 from codara.core.models import Session, User
 from codara.workspace.engine import WorkspaceEngine
+from codara.workspace.project import load_project_metadata
 
 
 class WorkspaceManager:
-    _INTERNAL_DIRS = {".git", ".uag"}
+    _INTERNAL_DIRS = {".git", ".uag", ".codara"}
 
     def __init__(
         self,
@@ -132,6 +133,7 @@ class WorkspaceManager:
             "path": str(resolved),
             "relative_path": relative_path,
             "name": resolved.name,
+            "project": load_project_metadata(resolved),
             "exists": resolved.exists(),
             "scope": scope,
             "owners": owners,

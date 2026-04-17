@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { Activity, Check, Copy, FolderCode, GitBranch, RefreshCw, Trash2, Users, X } from 'lucide-react';
 import type { WorkspaceDetailPayload, WorkspaceRecord, WorkspaceSessionBinding, WorkspaceUserBinding } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const getErrorMessage = (error: unknown) => {
   if (axios.isAxiosError(error)) {
@@ -253,7 +254,7 @@ const Workspaces = () => {
 
   const { data, isLoading, error } = useQuery<WorkspaceRecord[]>({
     queryKey: ['workspaces'],
-    queryFn: async () => (await axios.get('/management/v1/workspaces')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/workspaces', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 

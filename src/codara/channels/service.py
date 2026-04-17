@@ -9,6 +9,8 @@ from codara.config import Settings, get_provider_default_model
 from codara.core.models import Message, ProviderType, UagOptions
 from codara.database.manager import DatabaseManager
 from codara.services.inference import AttachmentInput, InferenceService
+from codara.workspace.manager import WorkspaceManager
+from codara.workspace.project import PROJECT_TEMPLATES, ProjectService
 
 
 @dataclass
@@ -110,6 +112,48 @@ class ChannelService:
             session_label=conversation["session_label"],
         )
 
+    def _project_service_for_user(self, user) -> ProjectService:
+        return ProjectService(
+            WorkspaceManager(
+                self.db,
+                workspaces_root=user.workspace_path,
+                isolated_envs_root=self.settings.isolated_envs_root,
+            )
+        )
+
+    def create_user_project(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        template: str = "default",
+        default_provider: Optional[str] = None,
+    ) -> dict:
+        user = self.db.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if template not in PROJECT_TEMPLATES:
+            raise HTTPException(status_code=400, detail=f"Unsupported project template: {template}")
+        result = self._project_service_for_user(user).create_project(
+            name,
+            template=template,
+            default_provider=default_provider,
+            created_by=f"channel:{user_id}",
+        )
+        return result.to_dict()
+
+    def list_user_projects(self, user_id: str) -> list[dict]:
+        user = self.db.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return self._project_service_for_user(user).list_projects()
+
+    def get_user_project(self, user_id: str, name: str) -> Optional[dict]:
+        user = self.db.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return self._project_service_for_user(user).get_project(name)
+
     def update_conversation_provider(self, conversation: dict, provider: str) -> dict:
         provider_enum = ProviderType(provider)
         return self.db.save_channel_conversation(
@@ -135,6 +179,27 @@ class ChannelService:
         )
         self.db.delete_session(client_session_id)
         return client_session_id
+
+    def get_conversation_session_status(self, conversation: dict) -> dict:
+        user = self.db.get_user(conversation["user_id"])
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        client_session_id = self.inference.user_session_id(
+            user.user_id,
+            conversation["workspace_id"],
+            conversation["session_label"],
+        )
+        session = self.db.get_session(client_session_id)
+        return {
+            "client_session_id": client_session_id,
+            "exists": session is not None,
+            "status": session.status.value if session else "not_started",
+            "backend_id": session.backend_id if session else None,
+            "account_id": session.account_id if session else None,
+            "cwd_path": session.cwd_path if session else None,
+            "last_context_tokens": session.last_context_tokens if session else None,
+            "updated_at": session.updated_at.isoformat() if session else None,
+        }
 
     async def execute_conversation_turn(
         self,

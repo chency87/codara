@@ -1,486 +1,229 @@
-# Design Specification: API Layer & Web Dashboard
+# Management API and Dashboard Guide
 
-## Unified Agent Gateway (UAG)
+This document describes the current Codara control plane: the `/management/v1/*` APIs and the `/dashboard` UI that consumes them.
 
-**Version:** 1.0  
-**Status:** Design Draft  
-**Depends On:** UAG SRDS v1.2  
-**Audience:** Internal engineers and operators
+## 1. Control-Plane Model
 
----
+The dashboard is a first-party client of the management API. It does not have privileged backend-only data access.
 
-## 0. Scope
-
-This document covers two layers that sit above the UAG core runtime:
-
-1. **The API Layer** — the full set of HTTP endpoints exposed by the Gateway, beyond the core `/v1/chat/completions` completion endpoint specified in SRDS §10. This includes management, observability, and control-plane APIs.
-2. **The Web Dashboard** — an operator-facing UI for monitoring system health, managing accounts and sessions, and diagnosing failures.
-
-These two layers are designed together because the dashboard is a first-party consumer of the management API. Every panel in the dashboard maps to an explicit API endpoint; there are no dashboard-internal data sources.
-
----
-
-## 1. Design Principles
-
-- **Dashboard = API client.** The dashboard has no privileged backend access. Every piece of data it displays is available via the management API, making the API independently useful for scripting and external tooling.
-- **Read-heavy, write-sparse.** The management API is primarily observability. Mutations (account addition, session termination) are rare and require explicit operator intent.
-- **Ops first.** The dashboard is designed for an operator diagnosing a problem at 2am, not for onboarding. Density and precision over visual polish.
-- **Audit everything.** All state-mutating API calls are logged to an immutable audit trail with actor identity, timestamp, and before/after state.
-
----
-
-## 2. API Layer Design
-
-### 2.1 Base URL & Versioning
-
-All management endpoints are namespaced under `/management/v1/` to distinguish them from the inference-compatible `/v1/` namespace.
-
-```
-/v1/chat/completions          ← inference API (SRDS §10)
-/management/v1/*              ← management API (this document)
-/dashboard/*                  ← static dashboard assets (served by Gateway)
+```text
+Operator
+   │
+   ▼
+/dashboard login
+   │
+   ▼
+POST /management/v1/auth/token
+   │
+   ▼
+Bearer token in sessionStorage
+   │
+   ▼
+Dashboard pages query /management/v1/*
 ```
 
-Versioning is path-based. Breaking changes increment the version prefix. Both versions are served concurrently during transition periods (minimum 30 days).
+## 2. Authentication
 
-### 2.2 Authentication
+Management endpoints require an operator bearer token or the configured management secret for token minting.
 
-All `/management/v1/` endpoints require a bearer token with an `operator` scope. This is distinct from the `user` scope used by inference API clients.
+Important notes:
 
-```
-Authorization: Bearer <operator_token>
-```
+- the login screen exchanges the operator secret for a bearer token
+- the dashboard stores the access token in `sessionStorage`
+- `API_TOKEN` remains the primary operational secret name
+- `UAG_MGMT_SECRET` is a supported fallback alias
 
-Tokens are issued via `POST /management/v1/auth/token` with a service account credential. Token TTL is 8 hours. Refresh is supported via `POST /management/v1/auth/refresh`.
+## 3. Current Management API Surface
 
-The dashboard authenticates via the same mechanism. On first load, if no valid token is present in `sessionStorage`, the dashboard redirects to a login page that exchanges credentials for a token.
+### 3.1 Users
 
-### 2.3 Common Response Envelope
+Routes:
 
-All management API responses follow a consistent envelope:
+- `GET /management/v1/users`
+- `GET /management/v1/users/{user_id}`
+- `POST /management/v1/users`
+- `POST /management/v1/users/{user_id}/suspend`
+- `POST /management/v1/users/{user_id}/unsuspend`
+- `DELETE /management/v1/users/{user_id}`
+- `GET /management/v1/users/{user_id}/keys`
+- `DELETE /management/v1/users/{user_id}/keys/{key_id}`
+- `POST /management/v1/users/{user_id}/keys/rotate`
+- `POST /management/v1/users/{user_id}/channels/link-token`
+- `POST /management/v1/users/{user_id}/workspace/reset`
+- `GET /management/v1/users/{user_id}/usage`
 
-```json
-{
-  "ok": true,
-  "data": { ... },
-  "meta": {
-    "request_id": "req_01J...",
-    "timestamp": "2026-04-12T10:00:00Z",
-    "page": { "cursor": "...", "has_more": true }
-  }
-}
-```
+Dashboard behavior:
 
-Errors:
+- the Users page shows the real `user_id`
+- operators can rotate keys
+- operators can create Telegram link tokens
+- operators can reset a user's workspace sessions
 
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "session_not_found",
-    "message": "No session with id 'abc123' exists.",
-    "request_id": "req_01J..."
-  }
-}
-```
+### 3.2 Workspaces
 
-Pagination uses cursor-based pagination throughout. Offset pagination is not supported.
+Routes:
 
-### 2.4 Endpoint Reference
+- `GET /management/v1/workspaces`
+- `GET /management/v1/workspaces/{workspace_id}`
+- `POST /management/v1/workspaces/{workspace_id}/reset`
+- `DELETE /management/v1/workspaces/{workspace_id}`
 
-#### System Health
+The Workspaces page is the operator-facing inventory of the managed workspace tree. It includes git metadata, bound users, and bound sessions.
 
-|Method|Path|Description|
-|---|---|---|
-|`GET`|`/management/v1/health`|Overall system health: gateway, orchestrator, state store|
-|`GET`|`/management/v1/overview`|Combined overview payload used by the dashboard home page|
-|`GET`|`/management/v1/health/providers`|Per-provider reachability and latency|
-|`GET`|`/management/v1/metrics`|Prometheus-compatible metrics scrape endpoint|
+### 3.3 Sessions
 
-**`GET /management/v1/health` response:**
+Routes:
 
-```json
-{
-  "ok": true,
-  "data": {
-    "status": "degraded",
-    "components": {
-      "gateway":      { "status": "ok",      "latency_ms": 1 },
-      "orchestrator": { "status": "ok",      "latency_ms": 3 },
-      "state_store":  { "status": "ok",      "latency_ms": 8 },
-      "redis":        { "status": "degraded","latency_ms": 420, "message": "high latency" }
-    },
-    "checked_at": "2026-04-12T10:00:00Z"
-  }
-}
-```
+- `GET /management/v1/sessions`
+- `GET /management/v1/sessions/{session_id}`
+- `GET /management/v1/sessions/{session_id}/turns`
+- `DELETE /management/v1/sessions/{session_id}`
+- `POST /management/v1/sessions/{session_id}/reset`
 
-Overall `status` is `"ok"` only if all components are `"ok"`. Otherwise `"degraded"` or `"down"`.
+### 3.4 Accounts
 
----
+Routes:
 
-#### Session Management
+- `GET /management/v1/accounts`
+- `GET /management/v1/accounts/{account_id}`
+- `POST /management/v1/accounts`
+- `POST /management/v1/accounts/upload`
+- `POST /management/v1/accounts/{account_id}/select`
+- `POST /management/v1/accounts/{account_id}/cooldown`
+- `POST /management/v1/accounts/{account_id}/recover`
+- `DELETE /management/v1/accounts/{account_id}`
 
-|Method|Path|Description|
-|---|---|---|
-|`GET`|`/management/v1/sessions`|List all sessions (paginated, filterable)|
-|`GET`|`/management/v1/sessions/:id`|Get session detail|
-|`DELETE`|`/management/v1/sessions/:id`|Terminate and evict a session|
-|`POST`|`/management/v1/sessions/:id/reset`|Reset session to clean state (clears dirty flag)|
-|`GET`|`/management/v1/sessions/:id/turns`|Get turn history for a session|
+Current provider policy:
 
-**Query parameters for `GET /management/v1/sessions`:**
+- Codex is the only managed account provider.
+- Gemini and OpenCode are local-only runtimes and are not imported into the managed account pool.
 
-|Param|Type|Description|
-|---|---|---|
-|`provider`|`string`|Filter by provider: `codex`, `gemini`, `opencode`|
-|`status`|`string`|Filter by status: `idle`, `active`, `dirty`, `expired`|
-|`workspace`|`string`|Filter by `cwd_path` prefix|
-|`after`|`cursor`|Pagination cursor|
-|`limit`|`int`|Results per page (default 50, max 200)|
+Current Codex isolation policy:
 
----
+- selecting a Codex account marks it CLI-primary in Codara
+- managed Codex credentials stay in the vault and isolated runtime path
+- selecting a managed Codex account does **not** overwrite the host `~/.codex/auth.json`
 
-#### Workspace Management
+### 3.5 Usage
 
-|Method|Path|Description|
-|---|---|---|
-|`GET`|`/management/v1/workspaces`|List managed workspaces under the provisioned workspaces root|
-|`GET`|`/management/v1/workspaces/:id`|Get workspace detail, git metadata, bound sessions, and bound users|
-|`POST`|`/management/v1/workspaces/:id/reset`|Wipe sessions bound to the workspace subtree while preserving files|
-|`DELETE`|`/management/v1/workspaces/:id`|Delete the workspace directory from disk and wipe bound sessions|
+Routes:
 
-Workspace records include:
-- the resolved workspace path and relative path under `workspaces_root`
-- scope classification (`base`, `subworkspace`, `orphan`)
-- git metadata when the workspace is a git repository (branch, HEAD commit, remote, dirty state)
-- bound users and bound sessions for the workspace subtree
+- `GET /management/v1/usage`
+- `GET /management/v1/usage/timeseries`
+- `POST /management/v1/usage/refresh`
+- `GET /management/v1/usage/accounts/{account_id}`
+- `GET /management/v1/usage/sessions/{session_id}`
 
----
+### 3.6 Observability
 
-#### Account Pool Management
+Routes:
 
-|Method|Path|Description|
-|---|---|---|
-|`GET`|`/management/v1/accounts`|List all accounts in the pool|
-|`GET`|`/management/v1/accounts/:id`|Get account detail + current usage metrics|
-|`POST`|`/management/v1/accounts`|Register a new account credential|
-|`POST`|`/management/v1/accounts/upload`|Register/update account with uploaded credential payload (`multipart/form-data`)|
-|`POST`|`/management/v1/accounts/:id/select`|Mark CLI-primary and materialize credential into provider CLI auth path|
-|`DELETE`|`/management/v1/accounts/:id`|Remove an account from the pool|
-|`POST`|`/management/v1/accounts/:id/cooldown`|Manually force an account into COOLDOWN|
-|`POST`|`/management/v1/accounts/:id/recover`|Manually release an account from COOLDOWN|
+- `GET /management/v1/health`
+- `GET /management/v1/health/providers`
+- `GET /management/v1/providers/models`
+- `GET /management/v1/overview`
+- `GET /management/v1/metrics`
+- `GET /management/v1/traces`
+- `GET /management/v1/traces/{trace_id}`
+- `GET /management/v1/logs`
+- `POST /management/v1/observability/prune`
 
-`POST /v1/chat/completions` and `POST /management/v1/playground/chat` both
-accept either JSON or `multipart/form-data`. For multipart turns, send the JSON
-request as `payload` and attach one or more files; the gateway stages them into
-the bound workspace and forwards their relative paths to the provider CLI in an
-injected system message.
+Observability storage model:
 
-**`POST /management/v1/accounts` request body:**
+- traces are file-backed structured events
+- runtime logs are file-backed JSONL shards
+- the API merges or filters them at query time
 
-```json
-{
-  "provider": "codex",
-  "auth_type": "API_KEY",
-  "credential": "sk-...",
-  "label": "codex-prod-01"
-}
-```
+### 3.7 Audit and Playground
 
-Credentials are encrypted at rest using AES-256-GCM. The raw credential is never returned in any response after creation — only a masked form (e.g., `sk-...vX9q`).
+Routes:
 
-**`POST /management/v1/accounts/upload` form fields:**
+- `GET /management/v1/audit`
+- `POST /management/v1/playground/chat`
 
-|Field|Type|Required|Description|
-|---|---|---|---|
-|`provider`|`string`|yes|`codex`, `gemini`, `opencode`|
-|`auth_type`|`string`|yes|`API_KEY` or `OAUTH_SESSION`|
-|`label`|`string`|yes|Operator-visible label|
-|`account_id`|`string`|no|If absent, backend auto-generates one|
-|`credential_text`|`string`|conditional|Inline credential payload (key, `auth.json`, `oauth_creds.json`)|
-|`credential_file`|`file`|conditional|Credential file upload (`.json`/`.txt`)|
+The Playground is intentionally routed through a dedicated dashboard admin user rather than an ad hoc operator-only execution path.
 
-Exactly one of `credential_text` or `credential_file` must be provided.
+## 4. Dashboard Page Map
 
-Credential storage and activation behavior:
-- Uploaded credentials are encrypted in SQLite and also persisted in the local vault directory: `~/.config/codara/credentials/<provider>/<account_id>.cred`.
-- The vault/SQLite registry is the only account inventory source shown by the dashboard. Provider auth files are not treated as separate accounts.
-- Selecting an account for CLI use copies its credential into the provider auth path:
-`codex` → `~/.codex/auth.json`, `gemini` → `~/.gemini/oauth_creds.json`, `opencode` → `~/.opencode/auth.json`.
-- Target auth paths can be overridden with `UAG_CODEX_AUTH_PATH`, `UAG_GEMINI_AUTH_PATH`, and `UAG_OPENCODE_AUTH_PATH`.
-- Automatic routing keeps one CLI-primary account active at a time and promotes the next healthiest ready account when the active one reaches 5% remaining headroom or less.
+The current dashboard routes and responsibilities are:
 
----
+| Route | Page | Purpose |
+| --- | --- | --- |
+| `/` | Overview | High-level runtime, provider, and audit summary |
+| `/playground` | Agent Playground | Operator testing through the shared user-bound flow |
+| `/sessions` | Active Sessions | Inspect, copy, reset, or delete sessions |
+| `/workspaces` | Workspaces | Inspect managed workspaces and reset/delete them |
+| `/accounts` | Account Pool | Register Codex accounts, select CLI-primary, cooldown/recover |
+| `/users` | Users | Provision users, rotate keys, issue Telegram link tokens, reset workspace sessions |
+| `/providers` | Providers | Runtime provider readiness and model inventory |
+| `/usage` | Usage Metrics | Aggregate and time-series usage views |
+| `/observability` | Observability | Unified trace + runtime-log workflow |
+| `/audit` | Audit Logs | Search and inspect management mutations |
 
-#### Observability
+## 5. Key Operator Workflows
 
-|Method|Path|Description|
-|---|---|---|
-|`GET`|`/management/v1/usage`|Aggregated token/request usage across all accounts|
-|`POST`|`/management/v1/usage/refresh`|Force immediate usage resync across account pool|
-|`GET`|`/management/v1/usage/accounts/:id`|Per-account usage time series|
-|`GET`|`/management/v1/usage/sessions/:id`|Per-session token consumption breakdown|
-|`GET`|`/management/v1/audit`|Paginated audit log of all management mutations|
+### 5.1 Provision a User
 
----
-
-#### Audit Log
-
-All state-mutating management API calls produce an immutable audit entry. The audit log is append-only and cannot be modified or deleted via any API endpoint.
-
-**`GET /management/v1/audit` response entry:**
-
-```json
-{
-  "audit_id": "aud_01J...",
-  "actor": "operator:svc-account-01",
-  "action": "session.terminated",
-  "target_type": "session",
-  "target_id": "abc123",
-  "before": { "status": "dirty" },
-  "after":  { "status": "terminated" },
-  "request_id": "req_01J...",
-  "timestamp": "2026-04-12T10:02:00Z"
-}
+```text
+Users page
+   │
+   ▼
+POST /management/v1/users
+   │
+   ▼
+one-time raw API key returned
+   │
+   ▼
+user begins calling /v1/chat/completions
 ```
 
----
+### 5.2 Link a Telegram User
 
-### 2.5 Rate Limiting
-
-Management API endpoints are rate-limited separately from the inference API. Default limits:
-
-|Endpoint Class|Limit|
-|---|---|
-|Read endpoints (`GET`)|600 req/min per token|
-|Write endpoints (`POST`, `DELETE`)|60 req/min per token|
-|Dashboard polling|15-30s refresh with standard query limits, depending on page volatility|
-|Metrics scrape (`/metrics`)|60 req/min (no auth required from internal network)|
-
----
-
-## 3. Web Dashboard Design
-
-### 3.1 Technology Decision
-
-The dashboard is a **single-page application**. Recommended stack:
-
-|Concern|Recommendation|Rationale|
-|---|---|---|
-|Framework|**React 19 + TypeScript**|Largest operator tooling ecosystem; strong typing for API contract enforcement|
-|Build|**Vite**|Fast dev iteration; no config overhead|
-|Data fetching|**TanStack Query v5**|Stale-while-revalidate and polling in one library|
-|Charts|**Recharts**|Composable, TypeScript-native, no canvas complexity|
-|Styling|**Tailwind CSS**|Utility-first, no runtime overhead, consistent density|
-|Tables|**TanStack Table v8**|Virtualized rows for large session lists; column-level filtering|
-
-This is a recommendation, not a mandate. Vue 3 + Vite is an equivalent alternative. The key constraint is that the framework must handle **large paginated tables** without DOM thrashing and support responsive polling-based refreshes.
-
-### 3.2 Layout
-
-The dashboard uses a fixed left sidebar navigation with a main content area. No nested navigation deeper than two levels.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  UAG Operator Dashboard            [health indicator] [user] │
-├──────────────┬──────────────────────────────────────────────┤
-│              │                                              │
-│  Overview    │                                              │
-│  Sessions    │         Main Content Area                    │
-│  Accounts    │                                              │
-│  Providers   │                                              │
-│  Usage       │                                              │
-│  Audit Log   │                                              │
-│              │                                              │
-└──────────────┴──────────────────────────────────────────────┘
+```text
+Users page
+   │
+   ▼
+Create channel link token
+POST /management/v1/users/{user_id}/channels/link-token
+   │
+   ▼
+operator copies raw token
+   │
+   ▼
+Telegram user sends: /link <token>
+   │
+   ▼
+channel_user_links row is created
 ```
 
-A persistent **system health badge** in the top bar shows `OK / DEGRADED / DOWN` at a glance, driven by the current health poll. Clicking it navigates to the Overview page.
+### 5.3 Diagnose a Runtime Problem
 
-### 3.3 Pages
+```text
+Overview or Providers page
+   │
+   ▼
+Observability page
+   │
+   ├─ query trace roots
+   ├─ query runtime log messages
+   └─ reconstruct one merged timeline by trace_id
+```
 
-#### Overview (Home)
+## 6. Current Config and Deployment Notes
 
-The landing page. Purpose: answer "is anything on fire right now?" in under 5 seconds.
+The dashboard and management plane rely on:
 
-**Panels:**
+- block-based `codara.toml`
+- a built UI bundle under `ui/dist`
+- the management secret in `.env` or environment variables
 
-|Panel|Data Source|Refresh|
-|---|---|---|
-|System health breakdown (component grid)|`GET /health`|30s poll|
-|Active sessions count|`GET /sessions?status=active`|15s poll|
-|Dirty sessions count (requires attention)|`GET /sessions?status=dirty`|15s poll|
-|Accounts in cooldown|`GET /accounts` filtered|15s poll|
-|Semaphore utilization gauge (active / max)|`GET /metrics`|10s poll|
-|Recent state summary|`GET /sessions`, `GET /accounts`|15s poll|
+The dashboard does not require a separate backend service. It is served directly by the gateway.
+The gateway also provides a dashboard-scoped history fallback: extensionless `/dashboard/*` paths return `ui/dist/index.html` so browser refreshes on React Router pages continue to work. Missing dashboard asset paths still return 404s, and API paths such as `/management/v1/*` are not affected by the fallback.
 
-The dirty sessions count and accounts-in-cooldown counts link directly to the filtered view of their respective pages.
+## 7. Known Boundaries
 
----
+Current intentional boundaries:
 
-#### Sessions
-
-A dense, filterable table of all sessions. Designed for fast triage.
-
-**Table columns:**
-
-|Column|Source Field|Notes|
-|---|---|---|
-|Session ID|`client_session_id`|Truncated, click to copy full value|
-|Provider|`provider`|Colored badge|
-|Status|`status`|`idle` / `active` / `dirty` / `expired` with color coding|
-|Workspace|`cwd_path`|Truncated path, hover for full|
-|Last active|`updated_at`|Relative time ("3m ago")|
-|Token cache|`prefix_hash` match|Hit / Miss badge from recent turn data|
-|Actions|—|Terminate, Reset|
-
-**Filters:** Provider, Status, Workspace prefix (text search), Last active (time range).
-
-**Session Detail Drawer:** Clicking a row opens a side drawer (not a new page) showing:
-
-- Full session metadata
-- Turn history table: turn index, input tokens, output tokens, finish reason, duration, timestamp
-- Workspace diff viewer for the most recent turn (unified diff with syntax highlighting)
-- Raw `backend_id` (for manual provider-side debugging)
-- Audit log entries scoped to this session
-
----
-
-#### Accounts
-
-Account pool management. Split into two tabs: **Active** and **Cooldown**.
-
-**Active tab columns:**
-
-|Column|Notes|
-|---|---|
-|Label|Human-readable name set at registration|
-|Provider|Colored badge|
-|Auth Type|`API_KEY` / `OAUTH_SESSION`|
-|TPM Used / Limit|Progress bar|
-|RPD Used / Limit|Progress bar|
-|Sessions Bound|Count of sessions currently using this account|
-|Actions|Force cooldown, Remove|
-
-**Cooldown tab:** Shows accounts currently in COOLDOWN with time remaining and reason (e.g., `"429 from provider"`). Each row has a **Recover** action for manual override.
-
-**Add Account modal:** Form with fields for Provider, Auth Type, Credential (password input), and Label. Submits to `POST /management/v1/accounts`. On success, the new account appears in the table; the credential is never shown again.
-
----
-
-#### Providers
-
-Health and latency view per provider. One card per provider (Codex, Gemini, OpenCode).
-
-**Per-provider card content:**
-
-- Reachability status badge
-- P50 / P95 adapter latency (last 5 minutes), sourced from `/metrics`
-- Active sessions count on this provider
-- Accounts available / in cooldown on this provider
-- Last health check timestamp
-
-This page is entirely read-only. No mutations. It auto-refreshes via polling.
-
----
-
-#### Usage
-
-Time-series token consumption charts for capacity planning and cost attribution.
-
-**Charts:**
-
-|Chart|X-axis|Y-axis|Granularity|
-|---|---|---|---|
-|Total tokens/hour across all providers|Time|Tokens|1h buckets, last 24h|
-|Per-provider token breakdown|Time|Tokens (stacked)|1h buckets, last 24h|
-|Per-account RPD utilization|Account|% of RPD limit used|Current day|
-|Cache hit rate over time|Time|Hit %|1h buckets, last 24h|
-
-All charts use a time range selector (1h / 6h / 24h / 7d). The 7d view uses 6h buckets.
-
-Data source: `GET /management/v1/usage` with `?granularity=1h&window=24h` query params.
-
----
-
-#### Audit Log
-
-Append-only, paginated table of all management mutations.
-
-**Columns:** Timestamp, Actor, Action, Target Type, Target ID, Request ID.
-
-Clicking a row expands an inline detail view showing the full `before` / `after` JSON diff.
-
-**Filters:** Actor, Action type, Target type, Time range. No delete or export — operators should use direct DB access for bulk audit export.
-
----
-
-### 3.4 Live Update Strategy
-
-The dashboard uses polling for management state. It no longer maintains a persistent event-stream connection.
-
-**Polling cadence:** Pages that show aggregate metrics use TanStack Query polling at intervals defined per-panel (10s for semaphore, 30s for health). Dashboard data is stale-safe by design and avoids streaming dependencies.
-
----
-
-### 3.5 Error States
-
-Every panel and table has an explicit error state (not just empty state). Error states show:
-
-- The specific API call that failed
-- The HTTP status and error code from the response envelope
-- A **Retry** button that re-triggers the query
-- A link to the Audit Log filtered to recent entries (in case the error is caused by a concurrent mutation)
-
-Empty states (zero results, not errors) are distinct from error states. An empty Sessions table shows "No sessions match your filters" with a clear filters button, not an error message.
-
----
-
-## 4. API ↔ Dashboard Mapping
-
-This table is the authoritative cross-reference between dashboard panels and their API dependencies. Any API change that affects a field in this table requires a corresponding dashboard update.
-
-|Dashboard Page / Panel|API Endpoint(s)|Update Mechanism|
-|---|---|---|
-|Overview — health grid|`GET /health`|30s poll|
-|Overview — active sessions|`GET /sessions?status=active`|15s poll|
-|Overview — dirty sessions|`GET /sessions?status=dirty`|15s poll|
-|Overview — accounts in cooldown|`GET /accounts`|15s poll|
-|Overview — semaphore gauge|`GET /metrics`|10s poll|
-|Overview — events feed|Removed|n/a|
-|Sessions — table|`GET /sessions`|15s poll + manual refresh|
-|Sessions — detail drawer|`GET /sessions/:id`, `GET /sessions/:id/turns`|On open|
-|Sessions — terminate|`DELETE /sessions/:id`|Mutation|
-|Sessions — reset|`POST /sessions/:id/reset`|Mutation|
-|Accounts — active tab|`GET /accounts`|15s poll + manual refresh|
-|Accounts — cooldown tab|`GET /accounts` filtered|15s poll|
-|Accounts — force cooldown|`POST /accounts/:id/cooldown`|Mutation|
-|Accounts — recover|`POST /accounts/:id/recover`|Mutation|
-|Accounts — add|`POST /accounts`|Mutation|
-|Accounts — remove|`DELETE /accounts/:id`|Mutation|
-|Providers — cards|`GET /usage`, `GET /metrics`|30s poll|
-|Usage — all charts|`GET /usage`, `GET /usage/accounts/:id`|Time-range poll|
-|Audit Log — table|`GET /audit`|Manual refresh + time-range filter|
-
----
-
-## 5. Implementation Priorities
-
-In order:
-
-1. **Core management API** — `GET /health`, `GET /sessions`, `GET /accounts`. These unblock all dashboard development.
-2. **Account mutation endpoints** — `POST /accounts`, `DELETE /accounts`, cooldown/recover. Required for ops to manage the pool without direct DB access.
-3. **Session mutation endpoints** — `DELETE /sessions/:id`, `POST /sessions/:id/reset`. Required for triage workflows.
-4. **Dashboard scaffold** — Layout, auth flow, Overview page wired to live data.
-5. **Sessions page** — Table + detail drawer + diff viewer.
-6. **Accounts page** — Active/Cooldown tabs + Add Account modal.
-7. **Providers page** — Read-only, straightforward once health endpoints exist.
-9. **Usage page** — Charts require `GET /usage` time-series data; implement last as it has the most backend aggregation work.
-10. **Audit log page** — Low complexity once the audit trail is written by the mutation endpoints.
-Implementation notes for the current codebase:
-
-- The Overview page uses `GET /management/v1/overview` instead of fetching full session/account lists just to compute summary cards.
-- Accounts, Sessions, and Audit Log all use cursor pagination to keep large datasets responsive.
-- Audit Log includes text search plus actor/action/target filters.
-- System-derived CLI auth rows are hidden from the visible account inventory unless they are explicitly registered into the vault.
+- the dashboard surfaces real management actions instead of acting as a generic API console
+- Observability is the primary log/trace debugging page; standalone Traces/Logs routes remain secondary
+- only Telegram is fully implemented as a channel runtime today
