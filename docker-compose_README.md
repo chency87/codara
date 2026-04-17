@@ -1,123 +1,102 @@
 # Codara Docker Deployment
 
-This directory contains Docker configuration files for deploying the Unified Agent Gateway (UAG).
+Use the default `docker-compose.yml` for the current single-node deployment path. It builds one Codara application image, serves the FastAPI backend and built dashboard from the same container, and runs Redis as a local sidecar.
 
 ## Quick Start
 
-### 1. Prerequisites
-
-- Docker Engine 24.0+
-- Docker Compose v2.20+
-
-### 2. Configuration
-
-Copy the example environment file and configure:
-
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+cp codara.toml.example codara.toml
+# Edit API_TOKEN and any provider/runtime settings.
+
+docker compose up --build
 ```
 
-### 3. Build & Run
+Open:
 
-#### Development
+- dashboard: `http://localhost:8000/dashboard`
+- health: `http://localhost:8000/management/v1/health`
+
+The container always listens on port `8000`. Change the published host port with `CODARA_HTTP_PORT` in `.env`.
+
+## Published Image
+
+The repository workflow publishes the image to GitHub Container Registry:
+
 ```bash
-docker-compose -f docker-compose.dev.yml up --build
+docker pull ghcr.io/chency87/codara:latest
 ```
 
-#### Production
-```bash
-docker-compose -f docker-compose.yml up --build
+To run from the published image instead of building locally, set this in `.env` and remove or ignore the compose `build` block in your deployment override:
+
+```env
+CODARA_IMAGE=ghcr.io/chency87/codara:latest
 ```
 
-Or with production services:
-```bash
-docker-compose -f docker-compose.prod.yml up --build
-```
+GHCR package visibility is controlled in GitHub package settings. After the first publish, mark the package public if anonymous pulls should work.
 
-## File Structure
+## Runtime Layout
 
-| File | Description |
-|------|-------------|
-| `Dockerfile` | Multi-stage build for the UAG application |
-| `docker-compose.yml` | Default compose file (SQLite + Redis) |
-| `docker-compose.dev.yml` | Development configuration |
-| `docker-compose.prod.yml` | Production with Nginx + SSL |
-| `.env.example` | Environment variable template |
-| `nginx.conf` | Nginx configuration for reverse proxy |
-| `.dockerignore` | Build context exclusions |
-
-## Services
-
-### Codara (Main Application)
-- Port: `8000` (configurable via `UAG_PORT`)
-- Health check: `/management/v1/health`
-- Dashboard: `/dashboard`
-
-### Redis
-- Port: `6379` (configurable via `REDIS_PORT`)
-- Used for session locks and hot cache
-
-### PostgreSQL (Optional)
-- Port: `5432`
-- For production, uncomment in `docker-compose.prod.yml`
-
-### Nginx (Production)
-- Port: `80` (HTTP)
-- Port: `443` (HTTPS, if SSL configured)
-
-## Volume Mounts
-
-| Volume | Container Path | Description |
-|--------|----------------|-------------|
+| Host/Compose volume | Container path | Purpose |
+| --- | --- | --- |
 | `codara_data` | `/data` | SQLite database |
-| `codara_workspaces` | `/workspaces` | User workspaces |
+| `codara_config` plus `./codara.toml` | `/config` | active config, encryption master key, credential vault |
+| `codara_logs` | `/logs` | structured runtime logs and trace shards |
+| `codara_workspaces` | `/workspaces` | user workspaces and isolated provider homes |
+| `redis_data` | `/data` in Redis | Redis append-only state |
 
-## Provider Credentials
+Important environment variables set by compose:
 
-Mount provider auth files:
+- `UAG_CONFIG_PATH=/config/codara.toml`
+- `UAG_CONFIG_DIR=/config`
+- `UAG_DATABASE_PATH=/data/codara.db`
+- `UAG_LOGS_ROOT=/logs`
+- `UAG_WORKSPACES_ROOT=/workspaces`
+- `UAG_ISOLATED_ENVS_ROOT=/workspaces/isolated_envs`
 
-```yaml
-volumes:
-  - ${CODEX_AUTH_PATH:-~/.codex/auth.json}:/root/.codex/auth.json:ro
-  - ${GEMINI_AUTH_PATH:-~/.gemini/oauth_creds.json}:/root/.gemini/oauth_creds.json:ro
-```
+## Dashboard Build
 
-## SSL/TLS (Production)
+The Docker image builds `ui/dist` during `docker build` and copies it into `/app/ui/dist`. Refresh-safe dashboard routes such as `/dashboard/workspaces` depend on that bundle containing `index.html`.
 
-1. Place SSL certificates in `./ssl/` directory:
-   - `cert.pem` - SSL certificate
-   - `key.pem` - Private key
+For local source changes:
 
-2. Uncomment the HTTPS server section in `nginx.conf`
-
-3. Use `docker-compose.prod.yml`
-
-## Management
-
-### View Logs
 ```bash
-docker-compose logs -f codara
+docker compose build codara
+docker compose up
 ```
 
-### Stop Services
-```bash
-docker-compose down
+## Provider CLIs
+
+Codara executes provider CLIs by command name: `codex`, `gemini`, and `opencode`. The base Docker image installs Node.js 20 plus:
+
+- `@openai/codex`
+- `@google/gemini-cli`
+- `opencode-ai`
+
+By default compose builds with `@latest` packages:
+
+```env
+CODEX_CLI_PACKAGE=@openai/codex@latest
+GEMINI_CLI_PACKAGE=@google/gemini-cli@latest
+OPENCODE_CLI_PACKAGE=opencode-ai@latest
 ```
 
-### Rebuild
+Pin these values in `.env` for reproducible production images. Keep provider auth inside Codara-managed credentials or isolated homes under `/workspaces/isolated_envs`; do not mount host auth files into `/root`, because the container runs as the non-root `codara` user.
+
+## Operations
+
 ```bash
-docker-compose build --no-cache
+docker compose logs -f codara
+docker compose exec codara bash
+docker compose restart codara
+docker compose down
 ```
 
-### Access Container Shell
-```bash
-docker-compose exec codara /bin/bash
-```
+Use `docker compose down -v` only when you intentionally want to delete the database, config vault, logs, workspaces, and Redis state.
 
 ## Security Notes
 
-- Always change `UAG_MGMT_SECRET` and `API_TOKEN` in production
-- Use SSL/TLS in production (via Nginx)
-- Run as non-root user (already configured in Dockerfile)
-- Keep database and credentials in volumes, not in image
+- Replace `API_TOKEN` in `.env` before exposing the service.
+- Do not bake `codara.toml`, `.env`, provider auth, database files, logs, or workspaces into the image.
+- Put TLS termination in a reverse proxy in front of `codara` for public deployments.
+- Back up both `codara_data` and `codara_config`; the database and encryption key/credential vault are both required to recover managed accounts.

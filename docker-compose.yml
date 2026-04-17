@@ -1,152 +1,83 @@
-# ============================================================
-# Unified Agent Gateway (UAG) - Docker Compose
-# ============================================================
-# Production-ready deployment with:
-# - UAG API server
-# - Redis for session locks (production)
-# - PostgreSQL for data persistence (production)
-# ============================================================
-
 services:
-  # ----------------------------------------------------------------
-  # Unified Agent Gateway (UAG) API Server
-  # ----------------------------------------------------------------
   codara:
     build:
       context: .
       dockerfile: Dockerfile
-    image: codara:latest
-    container_name: codara
+      args:
+        CODEX_CLI_PACKAGE: ${CODEX_CLI_PACKAGE:-@openai/codex@latest}
+        GEMINI_CLI_PACKAGE: ${GEMINI_CLI_PACKAGE:-@google/gemini-cli@latest}
+        OPENCODE_CLI_PACKAGE: ${OPENCODE_CLI_PACKAGE:-opencode-ai@latest}
+    image: ${CODARA_IMAGE:-codara:latest}
+    container_name: ${CODARA_CONTAINER_NAME:-codara}
+    restart: unless-stopped
     ports:
-      - "${UAG_PORT:-8000}:8000"
+      - "${CODARA_HTTP_PORT:-8000}:8000"
     environment:
-      # Server
-      - UAG_HOST=0.0.0.0
-      - UAG_PORT=8000
-      - UAG_DEBUG=${UAG_DEBUG:-false}
-      
-      # Database (SQLite for dev, PostgreSQL for prod)
-      - UAG_DATABASE_PATH=/data/codara.db
-      
-      # Workspaces
-      - UAG_WORKSPACES_ROOT=/workspaces
-      
-      # Security
-      - UAG_MGMT_SECRET=${UAG_MGMT_SECRET:-changeme}
-      - API_TOKEN=${API_TOKEN:-changeme}
-      
-      # Redis (for production session locks)
-      - REDIS_URL=redis://redis:6379/0
-      
-      # Optional: Codex billing API key
-      - UAG_CODEX_BILLING_API_KEY=${UAG_CODEX_BILLING_API_KEY:-}
-      - UAG_CODEX_USAGE_ENDPOINTS=${UAG_CODEX_USAGE_ENDPOINTS:-}
-      
-      # Optional: Gemini billing API key
-      - UAG_GEMINI_BILLING_API_KEY=${UAG_GEMINI_BILLING_API_KEY:-}
-      
-      # Optional: External PostgreSQL (uncomment for production)
-      # - UAG_DATABASE_PATH=postgresql://codara:password@postgres:5432/codara
+      UAG_HOST: 0.0.0.0
+      UAG_PORT: 8000
+      UAG_DEBUG: ${UAG_DEBUG:-false}
+
+      UAG_CONFIG_PATH: /config/codara.toml
+      UAG_CONFIG_DIR: /config
+      UAG_DATABASE_PATH: /data/codara.db
+      UAG_WORKSPACES_ROOT: /workspaces
+      UAG_ISOLATED_ENVS_ROOT: /workspaces/isolated_envs
+      UAG_LOGS_ROOT: /logs
+
+      API_TOKEN: ${API_TOKEN:-change-me-before-production}
+
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+
+      UAG_CODEX_STALL_TIMEOUT_SECONDS: ${UAG_CODEX_STALL_TIMEOUT_SECONDS:-600}
+      UAG_GEMINI_STALL_TIMEOUT_SECONDS: ${UAG_GEMINI_STALL_TIMEOUT_SECONDS:-600}
+      UAG_OPENCODE_STALL_TIMEOUT_SECONDS: ${UAG_OPENCODE_STALL_TIMEOUT_SECONDS:-600}
+
+      UAG_RELEASE_CHECK_ENABLED: ${UAG_RELEASE_CHECK_ENABLED:-false}
     volumes:
       - codara_data:/data
+      - codara_config:/config
+      - codara_logs:/logs
       - codara_workspaces:/workspaces
       - ./codara.toml:/config/codara.toml:ro
     depends_on:
       redis:
         condition: service_healthy
-      # postgres:
-      #   condition: service_healthy
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/management/v1/health"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/management/v1/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:exec,size=256m
     networks:
-      - codara-network
+      - codara
 
-  # ----------------------------------------------------------------
-  # Redis (for production session locks and hot cache)
-  # ----------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: codara-redis
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    container_name: ${CODARA_REDIS_CONTAINER_NAME:-codara-redis}
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 5s
     networks:
-      - codara-network
+      - codara
 
-  # ----------------------------------------------------------------
-  # PostgreSQL (optional - for production data persistence)
-  # ----------------------------------------------------------------
-  # Uncomment this section for production deployment
-  #
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: codara-postgres
-  #   environment:
-  #     - POSTGRES_USER=codara
-  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-  #     - POSTGRES_DB=codara
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "${POSTGRES_PORT:-5432}:5432"
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U codara"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
-  #   networks:
-  #     - codara-network
-
-  # ----------------------------------------------------------------
-  # Nginx Reverse Proxy (optional - for SSL termination)
-  # ----------------------------------------------------------------
-  # Uncomment this section for production with SSL
-  #
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: codara-nginx
-  #   ports:
-  #     - "${NGINX_PORT:-80}:80"
-  #     - "${NGINX_SSL_PORT:-443}:443"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./ssl:/etc/nginx/ssl:ro
-  #   depends_on:
-  #     - codara
-  #   restart: unless-stopped
-  #   networks:
-  #     - codara-network
-
-# ----------------------------------------------------------------
-# Named Volumes for Data Persistence
-# ----------------------------------------------------------------
 volumes:
   codara_data:
-    driver: local
+  codara_config:
+  codara_logs:
   codara_workspaces:
-    driver: local
   redis_data:
-    driver: local
-  # postgres_data:
-  #   driver: local
 
-# ----------------------------------------------------------------
-# Docker Networks
-# ----------------------------------------------------------------
 networks:
-  codara-network:
+  codara:
     driver: bridge

@@ -221,6 +221,7 @@ This is the current product boundary, not a temporary shortcut.
 ## 6. Configuration Model
 
 Runtime configuration is block-based in `codara.toml`.
+Use `codara.toml.example` as the sanitized starting point for new deployments.
 
 Key sections:
 

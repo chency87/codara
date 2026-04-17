@@ -1,0 +1,105 @@
+# Example Codara runtime configuration.
+# Copy this file to codara.toml and replace placeholder secrets before use.
+# Environment variables still override values from this file.
+
+[app]
+name = "Codara"
+version = "0.1.0"
+debug = false
+
+[server]
+host = "0.0.0.0"
+port = 8000
+# Prefer API_TOKEN in .env for real deployments. This is only a fallback.
+secret_key = "replace-with-a-long-random-secret"
+algorithm = "HS256"
+
+[database]
+# For Docker, prefer /data/codara.db via UAG_DATABASE_PATH.
+path = "data/codara.db"
+
+[orchestrator]
+max_concurrency = 10
+session_ttl_hours = 24
+
+[workspace]
+lock_timeout = 300
+root = "workspaces"
+# Shared persistent CLI HOME base for pooled provider accounts.
+isolated_envs_root = "workspaces/isolated_envs"
+
+[logging]
+root = "logs"
+max_bytes = 20971520
+backup_count = 5
+persistence_backend = "datetime_file"
+runtime_root = "runtime"
+retention_days = 30
+
+[limits]
+default_tpm_limit = 100000
+default_rpd_limit = 5000
+default_hourly_limit = 50000
+default_weekly_limit = 1000000
+
+[providers.codex]
+# Optional fallback billing credentials for usage sync.
+# OAuth session tokens in imported auth blobs are preferred first.
+billing_api_key = ""
+usage_endpoints = "https://chatgpt.com/backend-api/wham/usage,https://api.openai.com/dashboard/codex/usage"
+oauth_url = "https://auth0.openai.com/oauth/token"
+default_model = "gpt-5-codex"
+# Idle-output stall detection window. Set to 0 to disable process stall killing.
+stall_timeout_seconds = 600
+
+[providers.gemini]
+# Gemini and OpenCode are local/provider-CLI runtimes; Codara does not manage
+# their account credentials in the account pool.
+billing_api_key = ""
+usage_endpoints = "https://gemini.google.com/backend-api/wham/usage,https://aistudio.google.com/backend-api/wham/usage,https://api.gemini.ai/v1/usage"
+default_model = "gemini-2.5-pro"
+base_url = "https://api.gemini.ai"
+stall_timeout_seconds = 600
+
+[providers.opencode]
+default_model = "opencode/big-pickle"
+stall_timeout_seconds = 600
+
+[release]
+enabled = false
+# Configure before publishing, for example: "your-org/codara" or
+# "https://github.com/your-org/codara".
+repository = ""
+api_base_url = "https://api.github.com"
+check_timeout_seconds = 3
+check_cache_ttl_seconds = 21600
+
+[infra]
+redis_url = ""
+
+[telemetry]
+enabled = true
+persist_traces = true
+json_logs = true
+max_attr_length = 512
+persistence_backend = "file"
+trace_root = "traces"
+trace_retention_days = 30
+
+[channels.telegram]
+enabled = false
+# Use either "polling" or "webhook"; the current code starts only the selected mode.
+receive_mode = "polling"
+mention_only = false
+api_base = "https://api.telegram.org"
+
+[[channels.telegram.bots]]
+name = "codara-bot"
+enabled = false
+token = "replace-with-telegram-bot-token"
+username = "replace-with-bot-username"
+# Optional. Required only if receive_mode = "webhook" and you configure a
+# Telegram webhook secret token.
+webhook_secret = ""
+# Optional per-bot override. When omitted, channels.telegram.mention_only is used.
+mention_only = false

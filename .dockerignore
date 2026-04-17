@@ -46,10 +46,10 @@ htmlcov/
 docs/_build/
 site/
 
-# UI build artifacts (we copy from ui/dist only)
+# UI build artifacts (rebuilt in the ui-builder stage)
 ui/node_modules/
 ui/.vite/
-ui/dist/  # Built separately in multi-stage build
+ui/dist/
 
 # Docker
 docker-compose*.yml
@@ -60,6 +60,13 @@ Dockerfile*
 .env
 .env.*
 !.env.example
+codara.toml
+
+# Local provider/session state
+.codex/
+.gemini/
+.opencode/
+.config/
 
 # Database
 *.db
@@ -69,6 +76,8 @@ Dockerfile*
 # Logs
 *.log
 logs/
+data/
+workspaces/
 
 # Temporary files
 tmp/
@@ -76,5 +85,6 @@ temp/
 *.tmp
 
 # Agent data (should be in volumes)
+.agents/
 codara.db
 *.db-journal
