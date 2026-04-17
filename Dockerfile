@@ -1,93 +1,171 @@
-# ============================================================
-# Unified Agent Gateway (UAG) - Dockerfile
-# ============================================================
-# Multi-stage build for production deployment
-# Stage 1: Python dependencies
-# Stage 2: UI build
-# Stage 3: Final runtime image
-# ============================================================
+# syntax=docker/dockerfile:1.7
 
-# ----------------------------------------------------------------
-# Stage 1: Python Dependencies
-# ----------------------------------------------------------------
-FROM python:3.12-slim AS python-deps
+# ---------------------------------------------------------------------------
+# Codara production image
+#
+# The image builds the Vite dashboard, installs the Python package into a
+# self-contained virtualenv, installs provider CLIs, and includes common
+# project-development tools so provider agents can create/build workspaces.
+# Runtime state is expected to live in mounted volumes:
+# /data, /config, /logs, and /workspaces.
+# ---------------------------------------------------------------------------
 
-WORKDIR /app
-
-# Install uv for fast package management
-RUN pip install --no-cache-dir uv
-
-# Copy pyproject.toml for dependency resolution
-COPY pyproject.toml uv.lock ./
-
-# Install dependencies
-RUN uv sync --frozen --no-dev
-
-
-# ----------------------------------------------------------------
-# Stage 2: UI Build
-# ----------------------------------------------------------------
-FROM node:20-alpine AS ui-deps
+FROM node:20-alpine AS ui-builder
 
 WORKDIR /app/ui
 
-# Copy package files
-COPY ui/package.json ui/package-lock.json* ./
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm ci --legacy-peer-deps
-
-# Copy UI source
 COPY ui/ ./
-
-# Build UI (if dist doesn't exist, create empty placeholder)
-RUN npm run build || mkdir -p dist
+RUN npm run build
 
 
-# ----------------------------------------------------------------
-# Stage 3: Final Runtime Image
-# ----------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM node:20-bookworm-slim AS node-runtime
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for security
-RUN groupadd --gid 1000 codara && \
-    useradd --uid 1000 --gid codara --shell /bin/bash --create-home codara
+FROM python:3.12-slim AS python-builder
+
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Copy Python dependencies from stage 1
-COPY --from=python-deps /app ./
+RUN pip install --no-cache-dir uv
 
-# Copy built UI from stage 2
-COPY --from=ui-deps /app/ui/dist ./ui/dist
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
 
-# Create directories for data persistence
-RUN mkdir -p /data /workspaces /config && \
-    chown -R codara:codara /app /data /workspaces /config
+RUN uv venv "$VIRTUAL_ENV" \
+    && uv pip install -r uv.lock \
+    && uv pip install --no-deps .
 
-# Switch to non-root user
-USER codara
 
-# Environment variables (can be overridden at runtime)
-ENV PYTHONUNBUFFERED=1 \
+FROM python:3.12-slim AS runtime
+
+ARG CODEX_CLI_PACKAGE="@openai/codex@latest"
+ARG GEMINI_CLI_PACKAGE="@google/gemini-cli@latest"
+ARG OPENCODE_CLI_PACKAGE="opencode-ai@latest"
+ARG PNPM_VERSION="latest"
+ARG USERNAME="codara"
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+ENV VIRTUAL_ENV=/app/.venv \
+    UV_TOOL_BIN_DIR=/home/${USERNAME}/.local/bin \
+    PATH="/app/.venv/bin:/home/${USERNAME}/.local/bin:$PATH" \
+    HOME=/home/${USERNAME} \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
     UAG_HOST=0.0.0.0 \
     UAG_PORT=8000 \
+    UAG_CONFIG_PATH=/config/codara.toml \
+    UAG_CONFIG_DIR=/config \
     UAG_DATABASE_PATH=/data/codara.db \
-    UAG_WORKSPACES_ROOT=/workspaces
+    UAG_WORKSPACES_ROOT=/workspaces \
+    UAG_ISOLATED_ENVS_ROOT=/workspaces/isolated_envs \
+    UAG_LOGS_ROOT=/logs
 
-# Expose the application port
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        graphviz \
+        locales \
+        openssh-client \
+        sqlite3 \
+        sudo \
+        tini \
+        tmux \
+        vim \
+        wget \
+    && sed -i 's/^# *\\(en_US.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
+    && useradd \
+        --uid "${USER_UID}" \
+        --gid "${USER_GID}" \
+        --shell /bin/bash \
+        --create-home \
+        --no-log-init \
+        "${USERNAME}" \
+    && mkdir -p \
+        /app \
+        /data \
+        /config \
+        /logs \
+        /workspaces \
+        /workspaces/isolated_envs \
+        "/home/${USERNAME}/.local/bin" \
+        "/home/${USERNAME}/.local/share" \
+        "/home/${USERNAME}/.history" \
+    && chown -R "${USERNAME}:${USERNAME}" \
+        /app \
+        /data \
+        /config \
+        /logs \
+        /workspaces \
+        "/home/${USERNAME}" \
+    && echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > "/etc/sudoers.d/${USERNAME}" \
+    && chmod 0440 "/etc/sudoers.d/${USERNAME}" \
+    && git config --system --add safe.directory '*'
+
+WORKDIR /app
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node-runtime /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node-runtime /usr/local/bin/corepack /usr/local/bin/corepack
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/.venv /app/.venv
+COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/src /app/src
+COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/pyproject.toml /app/README.md ./
+COPY --from=ui-builder --chown=${USER_UID}:${USER_GID} /app/ui/dist /app/ui/dist
+
+RUN npm install -g \
+        "${CODEX_CLI_PACKAGE}" \
+        "${GEMINI_CLI_PACKAGE}" \
+        "${OPENCODE_CLI_PACKAGE}" \
+    && corepack enable \
+    && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+    && npm cache clean --force \
+    && node --version \
+    && npm --version \
+    && pnpm --version \
+    && command -v codex \
+    && command -v gemini \
+    && command -v opencode
+
+USER ${USERNAME}
+
+RUN printf '%s\n' \
+        'export HISTFILE=$HOME/.history/.bash_history' \
+        'export HISTSIZE=10000' \
+        'export HISTFILESIZE=20000' \
+        'export HISTCONTROL=ignoredups:erasedups' \
+        'shopt -s histappend' \
+        'PROMPT_COMMAND="history -a; history -c; history -r"' \
+        'export PATH=/app/.venv/bin:$HOME/.local/bin:$PATH' \
+        '[[ $- == *i* ]] && bind "\e[A":history-search-backward' \
+        '[[ $- == *i* ]] && bind "\e[B":history-search-forward' \
+        > "$HOME/.bashrc" \
+    && printf '%s\n' 'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi' > "$HOME/.bash_profile"
+
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/management/v1/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${UAG_PORT}/management/v1/health" >/dev/null || exit 1
 
-# Default command (can be overridden)
-CMD ["python", "-m", "codara.main"]
+ENTRYPOINT ["tini", "--"]
+CMD ["codara", "serve", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,109 @@
+name: Docker Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      codex_cli_package:
+        description: "Codex CLI npm package spec"
+        required: false
+        default: "@openai/codex@latest"
+      gemini_cli_package:
+        description: "Gemini CLI npm package spec"
+        required: false
+        default: "@google/gemini-cli@latest"
+      opencode_cli_package:
+        description: "OpenCode CLI npm package spec"
+        required: false
+        default: "opencode-ai@latest"
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+      - "[0-9]+.[0-9]+.[0-9]+"
+    paths:
+      - .github/workflows/docker-publish.yml
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - uv.lock
+      - README.md
+      - src/**
+      - ui/**
+  pull_request:
+    paths:
+      - .github/workflows/docker-publish.yml
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - uv.lock
+      - README.md
+      - src/**
+      - ui/**
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CODEX_CLI_PACKAGE: ${{ github.event.inputs.codex_cli_package || '@openai/codex@latest' }}
+  GEMINI_CLI_PACKAGE: ${{ github.event.inputs.gemini_cli_package || '@google/gemini-cli@latest' }}
+  OPENCODE_CLI_PACKAGE: ${{ github.event.inputs.opencode_cli_package || 'opencode-ai@latest' }}
+
+jobs:
+  docker:
+    name: Build and publish Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=Codara
+            org.opencontainers.image.description=Codara gateway and dashboard runtime
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and optionally push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            CODEX_CLI_PACKAGE=${{ env.CODEX_CLI_PACKAGE }}
+            GEMINI_CLI_PACKAGE=${{ env.GEMINI_CLI_PACKAGE }}
+            OPENCODE_CLI_PACKAGE=${{ env.OPENCODE_CLI_PACKAGE }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

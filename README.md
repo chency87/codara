@@ -41,6 +41,24 @@ If you change files under `ui/src`, rebuild the dashboard before using the serve
 
 The gateway serves dashboard client-side routes with a history fallback. After `ui/dist` exists, refreshing `/dashboard/workspaces`, `/dashboard/accounts`, or another dashboard page returns the React shell instead of a FastAPI JSON 404.
 
+## Run with Docker
+
+```bash
+cp .env.example .env
+# Edit API_TOKEN before exposing the service.
+docker compose up --build
+```
+
+The image builds the dashboard bundle during `docker build`, installs the Codex, Gemini, and OpenCode CLIs, then starts `codara serve` inside the container. Runtime state is persisted in named volumes for `/data`, `/config`, `/logs`, and `/workspaces`; see [`docker-compose_README.md`](docker-compose_README.md) for deployment details.
+
+The GitHub workflow publishes container images to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/chency87/codara:latest
+```
+
+Tagged releases such as `v0.1.0` publish matching semver tags. If the package is not publicly pullable after the first publish, mark the GHCR package visibility as public in the repository package settings.
+
 Check the installed framework version locally:
 
 ```bash
@@ -51,6 +69,12 @@ codara version --check
 `codara version --check` uses the GitHub latest-release API only when `[release].enabled = true` and `[release].repository` is configured in `codara.toml`.
 
 Runtime defaults come from [`codara.toml`](codara.toml), which is organized into blocks such as `[server]`, `[workspace]`, `[providers.*]`, and `[channels.*]`. Environment variables still override config values, including:
+
+Start from the sanitized example when creating a local config:
+
+```bash
+cp codara.toml.example codara.toml
+```
 
 - `API_TOKEN` for operator login (`UAG_MGMT_SECRET` remains a supported fallback alias)
 - `UAG_WORKSPACES_ROOT` for provisioned user workspaces
