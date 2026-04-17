@@ -45,10 +45,9 @@ RUN uv venv "$VIRTUAL_ENV" \
 
 FROM python:3.12-slim AS runtime
 
-ARG CODEX_CLI_PACKAGE="@openai/codex@latest"
-ARG GEMINI_CLI_PACKAGE="@google/gemini-cli@latest"
-ARG OPENCODE_CLI_PACKAGE="opencode-ai@latest"
-ARG PNPM_PACKAGE="pnpm@latest"
+ARG CODEX_CLI_PACKAGE="@openai/codex"
+ARG GEMINI_CLI_PACKAGE="@google/gemini-cli"
+ARG OPENCODE_CLI_PACKAGE="opencode-ai"
 ARG USERNAME="codara"
 ARG USER_UID=1000
 ARG USER_GID=1000
