@@ -53,6 +53,13 @@ ARG USERNAME="codara"
 ARG USER_UID=1000
 ARG USER_GID=1000
 
+ARG NODE_VERSION="24"
+ARG NVM_VERSION="0.40.3"
+ARG PNPM_VERSION="latest"
+ENV NVM_DIR=/home/${USERNAME}/.nvm
+ENV NVM_SYMLINK_CURRENT=true
+
+
 ENV VIRTUAL_ENV=/app/.venv \
     UV_TOOL_BIN_DIR=/home/${USERNAME}/.local/bin \
     PATH="/app/.venv/bin:/home/${USERNAME}/.local/bin:$PATH" \
@@ -132,20 +139,24 @@ COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/src /app/src
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/pyproject.toml /app/README.md ./
 COPY --from=ui-builder --chown=${USER_UID}:${USER_GID} /app/ui/dist /app/ui/dist
 
-RUN npm install -g \
+
+
+
+USER ${USERNAME}
+
+RUN mkdir -p "$NVM_DIR" \
+    && curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh | bash \
+    && source "$NVM_DIR/nvm.sh" \
+    && nvm install "$NODE_VERSION" \
+    && nvm alias default "$NODE_VERSION" \
+    && nvm use default \
+    && corepack enable \
+    && corepack prepare pnpm@${PNPM_VERSION} --activate \
+    && npm install -g \
         "${CODEX_CLI_PACKAGE}" \
         "${GEMINI_CLI_PACKAGE}" \
         "${OPENCODE_CLI_PACKAGE}" \
-        "${PNPM_PACKAGE}" \
-    && npm cache clean --force \
-    && node --version \
-    && npm --version \
-    && pnpm --version \
-    && command -v codex \
-    && command -v gemini \
-    && command -v opencode
-
-USER ${USERNAME}
+        "${PNPM_PACKAGE}" 
 
 RUN printf '%s\n' \
         'export HISTFILE=$HOME/.history/.bash_history' \
