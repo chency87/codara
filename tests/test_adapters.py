@@ -18,6 +18,43 @@ from codara.config import get_settings
 from codara.core.models import Message, Session, TurnResult, ProviderType, SessionStatus
 from codara.core.models import Account, AuthType
 from codara.database.manager import DatabaseManager
+from codara.accounts.pool import AccountPool
+
+class SilentReader:
+    async def read(self, size=-1):
+        await asyncio.sleep(30)
+        return b""
+
+
+class FakeStalledProc:
+    def __init__(self):
+        self.returncode = None
+        self.stdout = SilentReader()
+        self.stderr = SilentReader()
+        self.stdin = MagicMock()
+        async def drain():
+            return None
+        async def wait_closed():
+            return None
+        self.stdin.drain = drain
+        self.stdin.wait_closed = wait_closed
+        self._wait_future = asyncio.get_running_loop().create_future()
+        self.terminated = False
+
+    async def wait(self):
+        return await self._wait_future
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = 143
+        if not self._wait_future.done():
+            self._wait_future.set_result(self.returncode)
+
+    def kill(self):
+        self.returncode = 137
+        if not self._wait_future.done():
+            self._wait_future.set_result(self.returncode)
+
 
 def test_codex_adapter_extracts_all_usage_fields():
     adapter = CodexAdapter()
@@ -195,8 +232,9 @@ def test_gemini_adapter_send_turn_uses_local_cli(monkeypatch, tmp_path):
         )
     )
 
-    assert captured["command"][:4] == [adapter._resolve_executable("gemini"), "--yolo", "--output-format", "json"]
-    assert captured["command"][4:6] == ["--model", "gemini-2.5-flash"]
+    assert captured["command"][:5] == [adapter._resolve_executable("gemini"), "--yolo", "--sandbox=false", "--output-format", "json"]
+    assert "--sandbox" not in captured["command"]
+    assert captured["command"][5:7] == ["--model", "gemini-2.5-flash"]
     assert "--resume" in captured["command"]
     assert "existing-gemini-session" in captured["command"]
     assert "--prompt" in captured["command"]
@@ -313,6 +351,39 @@ def test_gemini_adapter_retries_without_resume_when_session_id_is_invalid(monkey
     assert result.output == "recovered"
     assert result.context_tokens == 3
 
+
+def test_gemini_adapter_terminates_stalled_cli(monkeypatch, tmp_path):
+    adapter = GeminiAdapter(stall_timeout_seconds=1)
+    observed = {}
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        proc = FakeStalledProc()
+        observed["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(gemini_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-gemini-stalled",
+        backend_id="",
+        provider=ProviderType.GEMINI,
+        account_id="gemini-system",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    with pytest.raises(RuntimeError, match="Gemini CLI stalled: no stdout/stderr output for 1s"):
+        asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "gemini-2.5-pro"))
+    assert observed["proc"].terminated is True
+
+
 def test_codex_adapter_parses_exec_output(tmp_path):
     adapter = CodexAdapter()
     output_path = tmp_path / "output.txt"
@@ -390,21 +461,250 @@ def test_codex_adapter_send_turn_passes_provider_model(monkeypatch, tmp_path):
 
     result = asyncio.run(adapter.send_turn(session, [Message(role="user", content="Say hi")], "gpt-5-codex"))
 
-    assert captured["command"][:7] == [
+    assert captured["command"][:8] == [
         adapter._resolve_executable("codex"),
+        "--search",
         "exec",
         "--skip-git-repo-check",
-        "--full-auto",
+        "--dangerously-bypass-approvals-and-sandbox",
         "--json",
         "--model",
         "gpt-5-codex",
     ]
+    assert "--full-auto" not in captured["command"]
     assert captured["command"][-1] == "-"
     assert captured["stdin"] == b"USER:\nSay hi"
     assert captured["kwargs"]["cwd"] == str(tmp_path)
     assert result.output == "hello from codex"
     assert result.backend_id == "codex-thread-1"
     assert result.context_tokens == 9
+
+
+def test_codex_adapter_syncs_updated_isolated_auth_after_success(monkeypatch, tmp_path):
+    db = DatabaseManager(str(tmp_path / "codara.db"))
+    pool = AccountPool(db)
+    pool.register_account(
+        Account(
+            account_id="codex-account",
+            provider=ProviderType.CODEX,
+            auth_type=AuthType.OAUTH_SESSION,
+            label="Codex Account",
+        ),
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "old-access",
+                    "refresh_token": "old-refresh",
+                    "id_token": "old-id",
+                },
+            }
+        ),
+    )
+    adapter = CodexAdapter(db)
+    captured = {}
+
+    temp_home = tmp_path / "isolated"
+    auth_path = temp_home / ".codex" / "auth.json"
+    auth_path.parent.mkdir(parents=True)
+    auth_path.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "id_token": "new-id",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = temp_home / "last-message.txt"
+    output_path.write_text("hello from codex", encoding="utf-8")
+
+    monkeypatch.setattr(
+        adapter,
+        "setup_isolated_env",
+        lambda provider_name, account_id, session=None: (str(temp_home), dict(os.environ)),
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self, input_data=None):
+            captured["stdin"] = input_data
+            payload = "\n".join(
+                [
+                    json.dumps({"type": "thread.started", "thread_id": "codex-thread-1"}),
+                    json.dumps({"type": "turn.completed", "usage": {"input_tokens": 5, "output_tokens": 4}}),
+                ]
+            )
+            return payload.encode(), b""
+
+        def terminate(self):
+            return None
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(codex_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-codex-sync",
+        backend_id="",
+        provider=ProviderType.CODEX,
+        account_id="codex-account",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    result = asyncio.run(adapter.send_turn(session, [Message(role="user", content="Say hi")], "gpt-5-codex"))
+    stored = json.loads(pool.get_credential("codex-account"))
+
+    assert result.output == "hello from codex"
+    assert stored["tokens"]["access_token"] == "new-access"
+    assert stored["tokens"]["refresh_token"] == "new-refresh"
+    assert stored["tokens"]["id_token"] == "new-id"
+
+
+def test_codex_adapter_does_not_sync_isolated_auth_after_failure(monkeypatch, tmp_path):
+    db = DatabaseManager(str(tmp_path / "codara.db"))
+    pool = AccountPool(db)
+    original = json.dumps(
+        {
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "old-access",
+                "refresh_token": "old-refresh",
+                "id_token": "old-id",
+            },
+        }
+    )
+    pool.register_account(
+        Account(
+            account_id="codex-account",
+            provider=ProviderType.CODEX,
+            auth_type=AuthType.OAUTH_SESSION,
+            label="Codex Account",
+        ),
+        original,
+    )
+    adapter = CodexAdapter(db)
+
+    temp_home = tmp_path / "isolated"
+    auth_path = temp_home / ".codex" / "auth.json"
+    auth_path.parent.mkdir(parents=True)
+    auth_path.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "id_token": "new-id",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        adapter,
+        "setup_isolated_env",
+        lambda provider_name, account_id, session=None: (str(temp_home), dict(os.environ)),
+    )
+
+    class FakeProc:
+        returncode = 1
+
+        async def communicate(self, input_data=None):
+            return b"", b"auth failed"
+
+        def terminate(self):
+            return None
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(codex_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-codex-fail",
+        backend_id="",
+        provider=ProviderType.CODEX,
+        account_id="codex-account",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    with pytest.raises(RuntimeError, match="auth failed"):
+        asyncio.run(adapter.send_turn(session, [Message(role="user", content="Say hi")], "gpt-5-codex"))
+
+    stored = json.loads(pool.get_credential("codex-account"))
+    assert stored["tokens"]["access_token"] == "old-access"
+    assert stored["tokens"]["refresh_token"] == "old-refresh"
+    assert stored["tokens"]["id_token"] == "old-id"
+
+
+def test_codex_adapter_terminates_stalled_cli(monkeypatch, tmp_path):
+    adapter = CodexAdapter(stall_timeout_seconds=1)
+    observed = {}
+    temp_home = tmp_path / "isolated"
+    temp_home.mkdir()
+
+    monkeypatch.setattr(
+        adapter,
+        "setup_isolated_env",
+        lambda provider_name, account_id, session=None: (str(temp_home), dict(os.environ)),
+    )
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        proc = FakeStalledProc()
+        observed["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(codex_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-codex-stalled",
+        backend_id="",
+        provider=ProviderType.CODEX,
+        account_id="codex-account",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    with pytest.raises(RuntimeError, match="Codex CLI stalled: no stdout/stderr output for 1s"):
+        asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "gpt-5-codex"))
+    assert observed["proc"].terminated is True
 
 
 def test_setup_isolated_env_reuses_account_scoped_home_across_sessions(tmp_path, monkeypatch):
@@ -497,18 +797,18 @@ def test_opencode_model_listing_parses_cli_output(monkeypatch):
             self.returncode = 0
 
         async def communicate(self):
-            return (b"openai/gpt-5\nanthropic/claude-sonnet-4.5\n", b"")
+            return (b"opencode/big-pickle\nanthropic/claude-sonnet-4.5\n", b"")
 
     async def fake_create_subprocess_exec(*command, **kwargs):
         return FakeProc()
 
     monkeypatch.setattr(opencode_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    payload = asyncio.run(adapter.list_models(type("SettingsRef", (), {"opencode_default_model": "openai/gpt-5"})()))
+    payload = asyncio.run(adapter.list_models(type("SettingsRef", (), {"opencode_default_model": "opencode/big-pickle"})()))
 
     assert payload["provider"] == "opencode"
     assert payload["status"] == "ok"
-    assert payload["models"][:2] == ["openai/gpt-5", "anthropic/claude-sonnet-4.5"]
+    assert payload["models"][:2] == ["opencode/big-pickle", "anthropic/claude-sonnet-4.5"]
 
 
 def test_opencode_adapter_send_turn_uses_local_cli(monkeypatch, tmp_path):
@@ -567,11 +867,95 @@ def test_opencode_adapter_send_turn_uses_local_cli(monkeypatch, tmp_path):
     assert "--session" in captured["command"]
     assert "existing-oc-session" in captured["command"]
     assert "--dir" in captured["command"]
+    assert "--dangerously-skip-permissions" in captured["command"]
     assert captured["kwargs"]["cwd"] == str(tmp_path)
     assert captured["kwargs"]["env"]["HOME"] == os.environ["HOME"]
     assert result.output == "hello from opencode"
     assert result.backend_id == "oc-session-1"
     assert result.context_tokens == 10
+
+
+def test_opencode_adapter_surfaces_json_error_events(monkeypatch, tmp_path):
+    adapter = OpenCodeAdapter()
+
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        async def communicate(self):
+            payload = json.dumps(
+                {
+                    "type": "error",
+                    "sessionID": "ses_error_1",
+                    "error": {
+                        "name": "UnknownError",
+                        "data": {"message": "Model not found: openai/gpt-5."},
+                    },
+                }
+            )
+            return payload.encode(), b""
+
+        def terminate(self):
+            return None
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(opencode_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-opencode-error",
+        backend_id="",
+        provider=ProviderType.OPENCODE,
+        account_id="opencode-system",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    with pytest.raises(RuntimeError, match="OpenCode CLI error: Model not found: openai/gpt-5\\."):
+        asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "openai/gpt-5"))
+
+
+def test_opencode_adapter_terminates_stalled_cli(monkeypatch, tmp_path):
+    adapter = OpenCodeAdapter(stall_timeout_seconds=1)
+    observed = {}
+
+    async def fake_create_subprocess_exec(*command, **kwargs):
+        proc = FakeStalledProc()
+        observed["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(opencode_adapter_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    now = datetime.now(timezone.utc)
+    session = Session(
+        client_session_id="client-opencode-stalled",
+        backend_id="",
+        provider=ProviderType.OPENCODE,
+        account_id="opencode-system",
+        cwd_path=str(tmp_path),
+        prefix_hash="prefix",
+        status=SessionStatus.IDLE,
+        fence_token=0,
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_context_tokens=0,
+    )
+
+    with pytest.raises(RuntimeError, match="OpenCode CLI stalled: no stdout/stderr output for 1s"):
+        asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "opencode/big-pickle"))
+    assert observed["proc"].terminated is True
 
 
 def test_opencode_adapter_retries_without_stale_session_and_parses_nested_assistant_message(monkeypatch, tmp_path):
@@ -637,7 +1021,7 @@ def test_opencode_adapter_retries_without_stale_session_and_parses_nested_assist
         last_context_tokens=0,
     )
 
-    result = asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "openai/gpt-5"))
+    result = asyncio.run(adapter.send_turn(session, [Message(role="user", content="Recover")], "opencode/big-pickle"))
 
     assert "--session" in commands[0]
     assert "--session" not in commands[1]

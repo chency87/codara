@@ -101,6 +101,41 @@ def test_management_trace_endpoints_and_headers(tmp_path, monkeypatch):
     assert "http.request.completed" in names
 
 
+def test_dashboard_poll_header_suppresses_successful_http_trace(tmp_path, monkeypatch):
+    db_path = tmp_path / "quiet-poll.db"
+    monkeypatch.setenv("API_TOKEN", "unit-test-secret")
+    monkeypatch.setenv("UAG_LOGS_ROOT", str(tmp_path / "logs"))
+    monkeypatch.setenv("UAG_CONFIG_PATH", str(tmp_path / "missing.toml"))
+    get_settings(force_reload=True)
+    gateway_app.settings.secret_key = "unit-test-secret"
+    gateway_app.db_manager = DatabaseManager(str(db_path))
+    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
+    gateway_app.clear_auth_caches()
+
+    client = TestClient(gateway_app.app)
+    headers = {
+        "Authorization": "Bearer unit-test-secret",
+        "X-Codara-Dashboard-Poll": "true",
+    }
+
+    quiet_resp = client.get("/management/v1/health", headers=headers)
+    assert quiet_resp.status_code == 200
+    assert quiet_resp.headers["X-Request-Id"].startswith("req_")
+    assert quiet_resp.headers["X-Trace-Id"] == ""
+
+    gateway_app.db_manager.wait_for_traces()
+    assert gateway_app.db_manager.list_traces(limit=10) == []
+
+    normal_resp = client.get("/management/v1/health", headers={"Authorization": "Bearer unit-test-secret"})
+    assert normal_resp.status_code == 200
+    normal_trace_id = normal_resp.headers["X-Trace-Id"]
+    assert normal_trace_id.startswith("trc_")
+
+    gateway_app.db_manager.wait_for_traces()
+    traces = gateway_app.db_manager.list_traces(limit=10, trace_id=normal_trace_id)
+    assert len(traces) == 1
+
+
 def test_management_runtime_logs_endpoint_reads_datetime_shards(tmp_path, monkeypatch):
     monkeypatch.setenv("API_TOKEN", "unit-test-secret")
     monkeypatch.setenv("UAG_LOGS_ROOT", str(tmp_path / "logs"))
@@ -130,6 +165,34 @@ def test_management_runtime_logs_endpoint_reads_datetime_shards(tmp_path, monkey
     filtered = client.get("/management/v1/logs", headers=headers, params={"since": future})
     assert filtered.status_code == 200
     assert not any(row["message"] == "runtime logs query test" for row in filtered.json()["data"])
+
+
+def test_relative_observability_roots_resolve_under_logs_root(tmp_path, monkeypatch):
+    config_path = tmp_path / "codara.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[logging]",
+                'root = "logs-root"',
+                'runtime_root = "runtime-store"',
+                "",
+                "[telemetry]",
+                'trace_root = "trace-store"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("UAG_CONFIG_PATH", str(config_path))
+    settings = get_settings(force_reload=True)
+
+    runtime_root = configure_logging(settings, force=True)
+    db = DatabaseManager(str(tmp_path / "telemetry.db"))
+    db.wait_for_traces()
+
+    assert runtime_root == (tmp_path / "logs-root" / "runtime-store").resolve()
+    assert db._trace_store is not None
+    assert db._trace_store.root == (tmp_path / "logs-root" / "trace-store").resolve()
 
 
 def test_file_backed_observability_pruning_removes_old_records(tmp_path):

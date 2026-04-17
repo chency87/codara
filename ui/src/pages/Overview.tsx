@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Activity, Cpu, Database, Server, ShieldCheck, Users, Wallet, History } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AuditLogRecord, OverviewPayload, ProviderHealthRecord } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const statusClass = (status?: string) => {
   if (status === 'ok') return 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
@@ -27,7 +28,7 @@ const MetricCard = ({ title, value, hint, icon: Icon }: { title: string; value: 
 const Overview = () => {
   const { data, isLoading, error } = useQuery<OverviewPayload>({
     queryKey: ['overview-summary'],
-    queryFn: async () => (await axios.get('/management/v1/overview')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/overview', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 
@@ -44,6 +45,8 @@ const Overview = () => {
   const providers = data?.providers || [];
   const recentAudit = data?.recent_audit || [];
   const runtime = data?.runtime || {};
+  const version = data?.version || {};
+  const releaseCheck = version.release_check || {};
 
   return (
     <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
@@ -106,6 +109,9 @@ const Overview = () => {
           <h3 className="text-xl font-black text-white mb-6">Runtime Config</h3>
           <div className="space-y-4">
             {[
+              ['Framework Version', version.version || 'n/a'],
+              ['Latest Release', releaseCheck.latest_version || releaseCheck.status || 'not checked'],
+              ['Update Available', releaseCheck.update_available ? 'yes' : 'no'],
               ['Workspaces Root', runtime.workspaces_root || 'n/a'],
               ['Max Concurrency', runtime.max_concurrency ?? 'n/a'],
               ['Session TTL', runtime.session_ttl_hours != null ? `${runtime.session_ttl_hours}h` : 'n/a'],

@@ -132,6 +132,22 @@ export interface OverviewRuntime {
   codex_usage_endpoints?: string[];
 }
 
+export interface VersionInfo {
+  name?: string;
+  version?: string;
+  release_check?: {
+    enabled?: boolean;
+    repository?: string | null;
+    current_version?: string;
+    latest_version?: string | null;
+    update_available?: boolean;
+    status?: string;
+    release_url?: string | null;
+    error?: string | null;
+    cached?: boolean;
+  };
+}
+
 export interface OverviewPayload {
   summary?: OverviewSummary;
   health?: {
@@ -142,6 +158,7 @@ export interface OverviewPayload {
   providers?: ProviderHealthRecord[];
   recent_audit?: AuditLogRecord[];
   runtime?: OverviewRuntime;
+  version?: VersionInfo;
 }
 
 export interface ProviderModelsRecord {
@@ -301,6 +318,17 @@ export interface RotateUserKeyResponse extends ApiKeyRecord {
   raw_key: string;
 }
 
+export interface ChannelLinkTokenResponse {
+  token_id: string;
+  raw_token: string;
+  user_id: string;
+  channel: string;
+  bot_name: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string;
+}
+
 export interface WorkspaceGitRecord {
   is_git_repo: boolean;
   branch?: string | null;
@@ -342,9 +370,19 @@ export interface WorkspaceSessionBinding {
   expires_at: number;
 }
 
+export interface ProjectMetadata {
+  name?: string;
+  template?: string;
+  created_by?: string | null;
+  created_at?: string | null;
+  default_provider?: string | null;
+  metadata_path?: string;
+}
+
 export interface WorkspaceRecord {
   workspace_id: string;
   name: string;
+  project?: ProjectMetadata | null;
   path: string;
   relative_path?: string | null;
   exists: boolean;
@@ -389,4 +427,19 @@ export interface TraceRecord {
   ended_at: number;
   duration_ms: number;
   attributes: Record<string, any>;
+}
+
+export interface ObservabilityPruneResult {
+  runtime_logs: {
+    retention_days: number;
+    files_deleted: number;
+    files_rewritten: number;
+    records_deleted: number;
+  };
+  traces: {
+    retention_days: number;
+    files_deleted: number;
+    files_rewritten: number;
+    records_deleted: number;
+  };
 }

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { ArrowRightLeft, Key, Plus, RefreshCw, Shield, Tag, Trash2, X } from 'lucide-react';
 import CursorPagination from '../components/CursorPagination';
 import type { AccountRecord, ApiEnvelope } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const formatNumber = (value?: number | null) => Number(value || 0).toLocaleString();
 const PAGE_SIZE = 25;
@@ -96,6 +97,7 @@ const Accounts = () => {
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null);
+  const [accountActionFeedback, setAccountActionFeedback] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([]);
   const [newAccount, setNewAccount] = useState({
@@ -113,6 +115,7 @@ const Accounts = () => {
     queryFn: async () =>
       (
         await axios.get('/management/v1/accounts', {
+          headers: dashboardPollHeaders,
           params: { limit: PAGE_SIZE, after: cursor || undefined },
         })
       ).data,
@@ -164,14 +167,48 @@ const Accounts = () => {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => axios.delete(`/management/v1/accounts/${id}`),
     onSuccess: async () => {
+      setAccountActionFeedback(null);
       await queryClient.invalidateQueries({ queryKey: ['management-accounts'] });
+    },
+    onError: error => {
+      setAccountActionFeedback(getErrorMessage(error));
     },
   });
 
   const selectMutation = useMutation({
     mutationFn: (id: string) => axios.post(`/management/v1/accounts/${id}/select`),
     onSuccess: async () => {
+      setAccountActionFeedback(null);
       await queryClient.invalidateQueries({ queryKey: ['management-accounts'] });
+    },
+    onError: error => {
+      setAccountActionFeedback(getErrorMessage(error));
+    },
+  });
+
+  const cooldownMutation = useMutation({
+    mutationFn: (id: string) => axios.post(`/management/v1/accounts/${id}/cooldown`),
+    onMutate: () => {
+      setAccountActionFeedback(null);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['management-accounts'] });
+    },
+    onError: error => {
+      setAccountActionFeedback(getErrorMessage(error));
+    },
+  });
+
+  const recoverMutation = useMutation({
+    mutationFn: (id: string) => axios.post(`/management/v1/accounts/${id}/recover`),
+    onMutate: () => {
+      setAccountActionFeedback(null);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['management-accounts'] });
+    },
+    onError: error => {
+      setAccountActionFeedback(getErrorMessage(error));
     },
   });
 
@@ -252,6 +289,12 @@ const Accounts = () => {
       {tableError && (
         <div className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm font-medium text-rose-200">
           Account pool loading failed: {tableError}
+        </div>
+      )}
+
+      {accountActionFeedback && (
+        <div className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm font-medium text-rose-200">
+          Account action failed: {accountActionFeedback}
         </div>
       )}
 
@@ -569,6 +612,25 @@ const Accounts = () => {
                           </div>
                         )}
                         <div className="flex justify-end gap-3">
+                          {String(account.status || '').toLowerCase() === 'cooldown' ? (
+                            <button
+                              onClick={() => recoverMutation.mutate(account.account_id)}
+                              disabled={recoverMutation.isPending}
+                              className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-200 disabled:opacity-50"
+                            >
+                              <RefreshCw size={14} className={recoverMutation.isPending ? 'animate-spin' : ''} />
+                              Recover
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => cooldownMutation.mutate(account.account_id)}
+                              disabled={cooldownMutation.isPending}
+                              className="inline-flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-black uppercase tracking-widest text-amber-200 disabled:opacity-50"
+                            >
+                              <RefreshCw size={14} className={cooldownMutation.isPending ? 'animate-spin' : ''} />
+                              Cooldown
+                            </button>
+                          )}
                           <button
                             onClick={() => selectMutation.mutate(account.account_id)}
                             disabled={isSelected || selectMutation.isPending}

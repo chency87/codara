@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { Copy, KeyRound, Plus, RefreshCw, UserCog, Users as UsersIcon, X } from 'lucide-react';
 import type {
+  ChannelLinkTokenResponse,
   CreateUserResponse,
   RotateUserKeyResponse,
   UsageSummaryPayload,
@@ -13,6 +14,7 @@ import type {
   WorkspaceResetRecord,
   ApiKeyRecord,
 } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const badgeClass = (status: string) => {
   if (status === 'active') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
@@ -45,16 +47,22 @@ const Users = () => {
   const [revealedKeyUserId, setRevealedKeyUserId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedKeyTarget, setCopiedKeyTarget] = useState<string | null>(null);
+  const [channelExpiry, setChannelExpiry] = useState(30);
+  const [channelBotName, setChannelBotName] = useState('engineering-bot');
+  const [revealedChannelToken, setRevealedChannelToken] = useState<ChannelLinkTokenResponse | null>(null);
+  const [copiedChannelToken, setCopiedChannelToken] = useState(false);
+  const [channelFeedback, setChannelFeedback] = useState<string | null>(null);
+  const [workspaceFeedback, setWorkspaceFeedback] = useState<string | null>(null);
 
   const { data: users, isLoading } = useQuery<UserSummary[]>({
     queryKey: ['users'],
-    queryFn: async () => (await axios.get('/management/v1/users')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/users', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 
   const { data: usage } = useQuery<UsageSummaryPayload>({
     queryKey: ['management-usage'],
-    queryFn: async () => (await axios.get('/management/v1/usage')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/usage', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 
@@ -112,6 +120,53 @@ const Users = () => {
     },
   });
 
+  const createChannelTokenMutation = useMutation({
+    mutationFn: (payload: { userId: string; botName: string; expiresInMinutes: number }) =>
+      axios.post(`/management/v1/users/${payload.userId}/channels/link-token`, {
+        channel: 'telegram',
+        bot_name: payload.botName,
+        expires_in_minutes: payload.expiresInMinutes,
+      }),
+    onMutate: () => {
+      setChannelFeedback(null);
+    },
+    onSuccess: (resp: { data: { data: ChannelLinkTokenResponse } }) => {
+      setRevealedChannelToken(resp.data.data);
+      setCopiedChannelToken(false);
+      setChannelFeedback(null);
+    },
+    onError: (error) => {
+      const detail = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : error instanceof Error
+          ? error.message
+          : 'Failed to create link token';
+      setChannelFeedback(detail);
+    },
+  });
+
+  const resetWorkspaceMutation = useMutation({
+    mutationFn: (userId: string) => axios.post(`/management/v1/users/${userId}/workspace/reset`),
+    onMutate: () => {
+      setWorkspaceFeedback(null);
+    },
+    onSuccess: async () => {
+      if (selectedUserId) {
+        await queryClient.invalidateQueries({ queryKey: ['user-detail', selectedUserId] });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['users'] });
+      setWorkspaceFeedback('Workspace sessions reset');
+    },
+    onError: (error) => {
+      const detail = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : error instanceof Error
+          ? error.message
+          : 'Failed to reset workspace';
+      setWorkspaceFeedback(detail);
+    },
+  });
+
   const markCopied = (target: string) => {
     setCopiedKey(true);
     setCopiedKeyTarget(target);
@@ -129,6 +184,18 @@ const Users = () => {
     if (!revealedKey || revealedKeyUserId !== userId) return;
     await copyToClipboard(revealedKey);
     markCopied(target);
+  };
+
+  const copyUserId = async (userId: string) => {
+    await copyToClipboard(userId);
+    markCopied(`user-id:${userId}`);
+  };
+
+  const copyChannelToken = async () => {
+    if (!revealedChannelToken?.raw_token) return;
+    await copyToClipboard(revealedChannelToken.raw_token);
+    setCopiedChannelToken(true);
+    setTimeout(() => setCopiedChannelToken(false), 1500);
   };
 
   const usageSummary = useMemo(() => {
@@ -252,6 +319,7 @@ const Users = () => {
                         <div>
                           <div className="font-black text-white">{user.display_name}</div>
                           <div className="text-[10px] font-mono text-slate-500">{user.email}</div>
+                          <div className="mt-1 text-[10px] font-mono text-slate-600">{user.user_id}</div>
                         </div>
                       </div>
                     </td>
@@ -303,6 +371,16 @@ const Users = () => {
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">User Detail</div>
               <h3 className="text-2xl font-black text-white">{selectedUser.data.display_name}</h3>
               <div className="text-xs font-mono text-slate-500 mt-2">{selectedUser.data.email}</div>
+              <button
+                onClick={() => void copyUserId(selectedUser.data.user_id)}
+                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-black/30 px-3 py-2 text-[10px] font-mono text-slate-400 hover:border-slate-700 hover:text-white"
+              >
+                <span>{selectedUser.data.user_id}</span>
+                <Copy size={12} />
+                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400">
+                  {copiedKeyTarget === `user-id:${selectedUser.data.user_id}` ? 'Copied' : 'Copy ID'}
+                </span>
+              </button>
             </div>
             <button onClick={() => setSelectedUserId(null)} className="text-slate-500 hover:text-white"><X size={18} /></button>
           </div>
@@ -323,6 +401,107 @@ const Users = () => {
                 <div className="mt-2 text-xs text-slate-500">Single active key policy · max concurrency {selectedUser.data.max_concurrency}</div>
               </div>
             </div>
+
+            <section>
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Channel Access</h4>
+                <button
+                  onClick={() => selectedUserId && resetWorkspaceMutation.mutate(selectedUserId)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-300 disabled:opacity-50"
+                  disabled={resetWorkspaceMutation.isPending}
+                >
+                  <RefreshCw size={12} className={resetWorkspaceMutation.isPending ? 'animate-spin' : ''} />
+                  Reset workspace sessions
+                </button>
+              </div>
+              {workspaceFeedback ? (
+                <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${
+                  workspaceFeedback === 'Workspace sessions reset'
+                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                    : 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                }`}>
+                  {workspaceFeedback}
+                </div>
+              ) : null}
+              <div className="rounded-2xl border border-slate-800 bg-black/30 p-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Channel</span>
+                    <input
+                      readOnly
+                      value="telegram"
+                      className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-300"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Bot Name</span>
+                    <input
+                      value={channelBotName}
+                      onChange={(event) => setChannelBotName(event.target.value)}
+                      className="w-full rounded-xl border border-slate-800 bg-black px-4 py-3 text-sm text-white"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Expires In Minutes</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={channelExpiry}
+                      onChange={(event) => setChannelExpiry(Number(event.target.value) || 1)}
+                      className="w-full rounded-xl border border-slate-800 bg-black px-4 py-3 text-sm text-white"
+                    />
+                  </label>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-4">
+                  <div className="text-xs text-slate-500">
+                    Create a one-time Telegram link token for this user, then send <code className="mx-1 rounded bg-slate-950 px-1.5 py-0.5 text-slate-300">/link &lt;token&gt;</code> in the bot chat.
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!selectedUserId) return;
+                      createChannelTokenMutation.mutate({
+                        userId: selectedUserId,
+                        botName: channelBotName.trim(),
+                        expiresInMinutes: channelExpiry,
+                      });
+                    }}
+                    disabled={!selectedUserId || !channelBotName.trim() || createChannelTokenMutation.isPending}
+                    className="rounded-xl bg-blue-600 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {createChannelTokenMutation.isPending ? 'Creating…' : 'Create Link Token'}
+                  </button>
+                </div>
+                {channelFeedback ? (
+                  <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                    {channelFeedback}
+                  </div>
+                ) : null}
+                {revealedChannelToken && revealedChannelToken.user_id === selectedUser.data.user_id && (
+                  <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                    <div className="text-[10px] font-black uppercase tracking-widest text-emerald-300">One-time Link Token</div>
+                    <button
+                      type="button"
+                      onClick={() => void copyChannelToken()}
+                      className="mt-3 flex w-full items-center gap-3 rounded-2xl border border-emerald-400/20 bg-black/30 p-4 text-left transition-colors hover:border-emerald-300/40"
+                    >
+                      <input
+                        readOnly
+                        value={revealedChannelToken.raw_token}
+                        className="w-full cursor-pointer bg-transparent font-mono text-sm text-white outline-none"
+                      />
+                      <Copy size={14} className="shrink-0 text-emerald-200" />
+                    </button>
+                    <div className="mt-3 flex items-center justify-between gap-4 text-xs text-slate-400">
+                      <span>Expires {formatDate(revealedChannelToken.expires_at)}</span>
+                      <span className="font-black uppercase tracking-widest text-emerald-300">
+                        {copiedChannelToken ? 'Copied' : 'Copy now'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
 
             <section>
               <div className="mb-4 flex items-center justify-between gap-4">

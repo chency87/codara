@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Activity, CalendarRange, LineChart, Users } from 'lucide-react';
 import type { TopUserRecord, UsageSummaryPayload, UsageTimeseriesPoint } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const getErrorMessage = (error: unknown) => {
   if (axios.isAxiosError(error)) {
@@ -29,13 +30,13 @@ const buildLinePath = (values: number[], width: number, height: number) => {
 const Usage = () => {
   const usageQuery = useQuery<UsageSummaryPayload>({
     queryKey: ['usage-metrics'],
-    queryFn: async () => (await axios.get('/management/v1/usage')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/usage', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 
   const seriesQuery = useQuery<UsageTimeseriesPoint[]>({
     queryKey: ['usage-timeseries'],
-    queryFn: async () => (await axios.get('/management/v1/usage/timeseries')).data.data,
+    queryFn: async () => (await axios.get('/management/v1/usage/timeseries', { headers: dashboardPollHeaders })).data.data,
     refetchInterval: 30000,
   });
 

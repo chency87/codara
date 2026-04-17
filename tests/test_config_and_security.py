@@ -32,9 +32,21 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
                 'billing_api_key = "sk-billing-test"',
                 'usage_endpoints = "https://example.test/usage-a,https://example.test/usage-b"',
                 'oauth_url = "https://example.test/oauth"',
+                "stall_timeout_seconds = 111",
                 "",
                 "[providers.gemini]",
                 'usage_endpoints = "https://example.test/gemini-a,https://example.test/gemini-b"',
+                "stall_timeout_seconds = 222",
+                "",
+                "[providers.opencode]",
+                "stall_timeout_seconds = 333",
+                "",
+                "[release]",
+                "enabled = true",
+                'repository = "codara/codara"',
+                'api_base_url = "https://api.github.test"',
+                "check_timeout_seconds = 7",
+                "check_cache_ttl_seconds = 99",
                 "",
                 "[infra]",
                 'redis_url = "redis://localhost:6379/0"',
@@ -76,11 +88,19 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
     assert settings.codex_billing_api_key == "sk-billing-test"
     assert settings.codex_usage_endpoints == "https://example.test/usage-a,https://example.test/usage-b"
     assert settings.codex_oauth_url == "https://example.test/oauth"
+    assert settings.codex_stall_timeout_seconds == 111
     assert settings.gemini_usage_endpoints == "https://example.test/gemini-a,https://example.test/gemini-b"
+    assert settings.gemini_stall_timeout_seconds == 222
+    assert settings.opencode_stall_timeout_seconds == 333
+    assert settings.release_check_enabled is True
+    assert settings.release_repository == "codara/codara"
+    assert settings.release_api_base_url == "https://api.github.test"
+    assert settings.release_check_timeout_seconds == 7
+    assert settings.release_check_cache_ttl_seconds == 99
     assert settings.telemetry_persistence_backend == "file"
-    assert settings.telemetry_trace_root == str((tmp_path / "trace-store").resolve())
+    assert settings.telemetry_trace_root == "trace-store"
     assert settings.telemetry_trace_retention_days == 9
-    assert settings.runtime_log_root == str((tmp_path / "runtime-store").resolve())
+    assert settings.runtime_log_root == "runtime-store"
     assert settings.log_retention_days == 12
     assert settings.channels.telegram.enabled is True
     assert settings.channels.telegram.receive_mode == "webhook"

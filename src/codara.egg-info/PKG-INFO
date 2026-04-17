@@ -57,6 +57,7 @@ Runtime defaults come from [`codara.toml`](codara.toml). Environment variables s
 
 - `API_TOKEN` for operator login (`UAG_MGMT_SECRET` remains a supported fallback alias)
 - `UAG_WORKSPACES_ROOT` for provisioned user workspaces
+- `UAG_CODEX_STALL_TIMEOUT_SECONDS`, `UAG_GEMINI_STALL_TIMEOUT_SECONDS`, and `UAG_OPENCODE_STALL_TIMEOUT_SECONDS` for killing provider CLIs that are alive but no longer producing stdout/stderr progress
 - `UAG_CODEX_AUTH_PATH`, `UAG_GEMINI_AUTH_PATH`, `UAG_OPENCODE_AUTH_PATH` for CLI auth materialization targets
 
 ## Register accounts
@@ -159,7 +160,7 @@ For user-key requests:
 - `workspace_root` is injected by the gateway from the provisioned workspace and should usually be omitted.
 - `workspace_id` is only needed when the user wants multiple isolated sub-workspaces; otherwise the default workspace is used.
 - `manual_mode` is an advanced runtime control and can usually be omitted.
-- `model` may be either an explicit provider runtime model (for example `gpt-5-codex`, `gemini-2.5-pro`, or `openai/gpt-5`) or a `uag-*` alias; aliases resolve to the configured provider default model from `codara.toml`.
+- `model` may be either an explicit provider runtime model (for example `gpt-5-codex`, `gemini-2.5-pro`, or `opencode/big-pickle`) or a `uag-*` alias; aliases resolve to the configured provider default model from `codara.toml`.
 - `GET /v1/user/providers/models` returns the current provider model listings; operators can query the same inventory via `GET /management/v1/providers/models`.
 
 ### Response extensions

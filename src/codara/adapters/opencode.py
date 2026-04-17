@@ -6,15 +6,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 from codara.adapters.base import ProviderAdapter, CliRuntimeMixin
-from codara.config import get_provider_default_model
+from codara.adapters.cli_monitor import communicate_with_stall_detection, terminate_process
+from codara.config import get_provider_default_model, get_settings
 from codara.core.models import Message, ProviderType, Session, TurnResult
 
 logger = logging.getLogger(__name__)
 
 
 class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
-    def __init__(self):
+    def __init__(self, stall_timeout_seconds: Optional[int] = None):
         CliRuntimeMixin.__init__(self)
+        self.stall_timeout_seconds = (
+            int(stall_timeout_seconds)
+            if stall_timeout_seconds is not None
+            else int(get_settings().opencode_stall_timeout_seconds)
+        )
 
     async def send_turn(self, session: Session, messages: List[Message], provider_model: str) -> TurnResult:
         opencode_bin = self._resolve_executable("opencode")
@@ -45,7 +51,11 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                     env=os.environ.copy(),
                     cwd=session.cwd_path,
                 )
-                stdout, stderr = await proc.communicate()
+                stdout, stderr = await communicate_with_stall_detection(
+                    proc,
+                    stall_timeout_seconds=self.stall_timeout_seconds,
+                    process_label="OpenCode CLI",
+                )
                 stderr_output = stderr.decode().strip()
                 if proc.returncode != 0:
                     lowered = stderr_output.lower()
@@ -72,8 +82,7 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                 raise RuntimeError("OpenCode CLI is not installed on the local system") from exc
             finally:
                 if proc is not None and proc.returncode is None:
-                    proc.terminate()
-                    await proc.wait()
+                    await terminate_process(proc)
         raise RuntimeError("OpenCode CLI exec failed: unable to recover from invalid session state")
 
     async def list_models(self, settings: Any) -> dict[str, Any]:
@@ -175,6 +184,7 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
         output_parts: list[str] = []
         final_output = ""
         context_tokens: Optional[int] = None
+        seen_event_types: list[str] = []
 
         for payload in self._iter_json_objects(stdout):
             backend_id = (
@@ -186,6 +196,11 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
             )
 
             event_type = str(payload.get("type") or "")
+            if event_type:
+                seen_event_types.append(event_type)
+            if event_type == "error":
+                error_message = self._extract_error_message(payload)
+                raise RuntimeError(f"OpenCode CLI error: {error_message or 'unknown OpenCode CLI error'}")
             if event_type in {"message.delta", "turn.delta", "text"}:
                 text = self._extract_message_text(payload)
                 if isinstance(text, str) and text:
@@ -213,7 +228,8 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
 
         output_text = final_output or "".join(output_parts).strip()
         if not output_text:
-            raise RuntimeError("OpenCode CLI did not return an assistant message")
+            event_summary = ", ".join(seen_event_types[:8]) if seen_event_types else "none"
+            raise RuntimeError(f"OpenCode CLI did not return an assistant message (events: {event_summary})")
         return backend_id, context_tokens, output_text
 
     def _iter_json_objects(self, stdout: str) -> list[dict[str, Any]]:
@@ -276,6 +292,29 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                     return extracted
             if payload.get("type") == "text" and isinstance(payload.get("text"), str):
                 return payload["text"]
+        return ""
+
+    def _extract_error_message(self, payload: Any) -> str:
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, list):
+            messages = [self._extract_error_message(item).strip() for item in payload]
+            return "; ".join(message for message in messages if message)
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            if isinstance(data, dict):
+                data_message = self._extract_error_message(data)
+                if data_message:
+                    return data_message
+            error = payload.get("error")
+            if isinstance(error, (dict, list, str)):
+                error_message = self._extract_error_message(error)
+                if error_message:
+                    return error_message
+            for key in ("message", "detail", "name"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
         return ""
 
     def _parse_models_output(self, stdout: str, default_model: str) -> list[str]:

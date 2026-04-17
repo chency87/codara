@@ -55,7 +55,7 @@ def test_cli_account_selection_updates_pool_preference(tmp_path, monkeypatch):
     assert acquired.account_id == "codex-selected"
 
 
-def test_cli_account_selection_materializes_credential_to_cli_auth_path(tmp_path, monkeypatch):
+def test_cli_account_selection_does_not_materialize_managed_codex_to_host_auth_path(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     codex_auth_path = tmp_path / "codex-home" / ".codex" / "auth.json"
 
@@ -80,12 +80,11 @@ def test_cli_account_selection_materializes_credential_to_cli_auth_path(tmp_path
     select_resp = client.post("/management/v1/accounts/codex-uploaded/select", headers=headers)
     assert select_resp.status_code == 200
     data = select_resp.json()["data"]
-    assert data["activated_auth_path"] == str(codex_auth_path)
-    assert codex_auth_path.exists()
-    assert '"access_token":"abc"' in codex_auth_path.read_text(encoding="utf-8")
+    assert data["activated_auth_path"] is None
+    assert not codex_auth_path.exists()
 
 
-def test_updating_cli_primary_credential_re_materializes_auth_path(tmp_path, monkeypatch):
+def test_updating_cli_primary_credential_does_not_re_materialize_host_auth_path(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     codex_auth_path = tmp_path / "codex-home" / ".codex" / "auth.json"
 
@@ -101,12 +100,12 @@ def test_updating_cli_primary_credential_re_materializes_auth_path(tmp_path, mon
     )
 
     pool.register_account(account, '{"tokens":{"access_token":"old-token"}}')
-    assert '"old-token"' in codex_auth_path.read_text(encoding="utf-8")
+    assert not codex_auth_path.exists()
 
     updated = pool.update_credential("codex-primary", '{"tokens":{"access_token":"new-token"}}')
 
     assert updated is not None
-    assert '"new-token"' in codex_auth_path.read_text(encoding="utf-8")
+    assert not codex_auth_path.exists()
 
 
 def test_account_pool_registers_metadata_from_json_blob(tmp_path):
@@ -308,7 +307,7 @@ def test_account_pool_ignores_system_inventory_accounts(tmp_path):
     assert acquired.account_id == "codex-vault"
 
 
-def test_codex_oauth_prefers_richer_cli_auth_file(tmp_path, monkeypatch):
+def test_codex_oauth_keeps_managed_credential_without_using_host_auth_file(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     cli_auth_path = tmp_path / "codex-home" / ".codex" / "auth.json"
     cli_auth_path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,12 +342,12 @@ def test_codex_oauth_prefers_richer_cli_auth_file(tmp_path, monkeypatch):
 
     assert credential is not None
     payload = json.loads(credential)
-    assert payload["tokens"]["access_token"] == "real-access"
-    assert payload["tokens"]["refresh_token"] == "real-refresh"
-    assert payload["tokens"]["id_token"] == "real-id"
+    assert payload["tokens"]["access_token"] == "stale-access"
+    assert "refresh_token" not in payload["tokens"]
+    assert "id_token" not in payload["tokens"]
 
 
-def test_activate_for_cli_preserves_richer_existing_auth_file(tmp_path, monkeypatch):
+def test_activate_for_cli_is_noop_for_managed_codex_accounts(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     cli_auth_path = tmp_path / "codex-home" / ".codex" / "auth.json"
     cli_auth_path.parent.mkdir(parents=True, exist_ok=True)
@@ -380,14 +379,14 @@ def test_activate_for_cli_preserves_richer_existing_auth_file(tmp_path, monkeypa
 
     path = pool.activate_for_cli("codex-select")
 
-    assert path == str(cli_auth_path)
+    assert path is None
     payload = json.loads(cli_auth_path.read_text(encoding="utf-8"))
     assert payload["tokens"]["access_token"] == "real-access"
     assert payload["tokens"]["refresh_token"] == "real-refresh"
     assert payload["tokens"]["id_token"] == "real-id"
 
 
-def test_get_credential_restores_cli_auth_when_stored_copy_is_richer(tmp_path, monkeypatch):
+def test_get_credential_does_not_restore_host_auth_when_stored_copy_is_richer(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     cli_auth_path = tmp_path / "codex-home" / ".codex" / "auth.json"
     cli_auth_path.parent.mkdir(parents=True, exist_ok=True)
@@ -420,5 +419,6 @@ def test_get_credential_restores_cli_auth_when_stored_copy_is_richer(tmp_path, m
 
     assert credential == rich
     healed = json.loads(cli_auth_path.read_text(encoding="utf-8"))
-    assert healed["tokens"]["refresh_token"] == "real-refresh"
-    assert healed["tokens"]["id_token"] == "real-id"
+    assert healed["tokens"]["access_token"] == "stale-access"
+    assert "refresh_token" not in healed["tokens"]
+    assert "id_token" not in healed["tokens"]

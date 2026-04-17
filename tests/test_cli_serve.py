@@ -87,3 +87,37 @@ def test_account_group_no_longer_exposes_non_codex_import_commands():
     assert result.exit_code == 0
     assert "import-gemini" not in result.output
     assert "import-opencode" not in result.output
+
+
+def test_version_command_prints_current_version(monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(cli_main, "get_version", lambda: "9.8.7")
+
+    result = runner.invoke(cli_main.cli, ["version"])
+
+    assert result.exit_code == 0
+    assert "Codara 9.8.7" in result.output
+
+
+def test_version_command_checks_configured_release(monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(cli_main, "get_version", lambda: "1.0.0")
+    monkeypatch.setattr(cli_main.settings, "release_check_enabled", True)
+    monkeypatch.setattr(cli_main.settings, "release_repository", "codara/codara")
+    monkeypatch.setattr(cli_main.settings, "release_api_base_url", "https://api.github.test")
+    monkeypatch.setattr(cli_main.settings, "release_check_timeout_seconds", 1)
+
+    class Result:
+        status = "ok"
+        update_available = True
+        latest_version = "1.1.0"
+        release_url = "https://github.test/release"
+        error = None
+
+    monkeypatch.setattr(cli_main, "check_for_update", lambda **kwargs: Result())
+
+    result = runner.invoke(cli_main.cli, ["version", "--check"])
+
+    assert result.exit_code == 0
+    assert "Codara 1.0.0" in result.output
+    assert "Update available: 1.1.0" in result.output

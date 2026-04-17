@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Send, Terminal, Cpu, Folder, RefreshCcw, Code, AlertTriangle, FileJson } from 'lucide-react';
 import axios from 'axios';
 import type { ChatResponsePayload, ProviderModelsRecord } from '../types/api';
+import { dashboardPollHeaders } from '../api/dashboardPoll';
 
 const PROVIDERS = [
   { value: 'codex', label: 'Codex' },
@@ -48,7 +49,7 @@ const Playground = () => {
   const { data: providerModels } = useQuery<ProviderModelsRecord[]>({
     queryKey: ['provider-models'],
     queryFn: async () => {
-      const resp = await axios.get('/management/v1/providers/models');
+      const resp = await axios.get('/management/v1/providers/models', { headers: dashboardPollHeaders });
       return resp.data.data || [];
     },
     refetchInterval: 30000,

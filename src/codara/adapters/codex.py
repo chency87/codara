@@ -9,8 +9,9 @@ import httpx
 from pathlib import Path
 from codara.core.models import Session, Message, TurnResult
 from codara.adapters.base import ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin
+from codara.adapters.cli_monitor import communicate_with_stall_detection, terminate_process
 from codara.database.manager import DatabaseManager
-from codara.config import get_provider_default_model
+from codara.config import get_provider_default_model, get_settings
 from codara.core.models import ProviderType
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,18 @@ class CodexAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
         "logs*.sqlite*",
     )
 
-    def __init__(self, db_manager: Optional[DatabaseManager] = None):
+    def __init__(
+        self,
+        db_manager: Optional[DatabaseManager] = None,
+        stall_timeout_seconds: Optional[int] = None,
+    ):
         ConfigIsolationMixin.__init__(self, db_manager)
         CliRuntimeMixin.__init__(self)
+        self.stall_timeout_seconds = (
+            int(stall_timeout_seconds)
+            if stall_timeout_seconds is not None
+            else int(get_settings().codex_stall_timeout_seconds)
+        )
 
     async def send_turn(self, session: Session, messages: List[Message], provider_model: str) -> TurnResult:
         codex_bin = self._resolve_executable("codex")
@@ -34,9 +44,10 @@ class CodexAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
         prompt = self._messages_to_prompt(messages)
         command = [
             codex_bin,
+            "--search",
             "exec",
             "--skip-git-repo-check",
-            "--full-auto",
+            "--dangerously-bypass-approvals-and-sandbox",
             "--json",
             "--model",
             provider_model,
@@ -61,7 +72,12 @@ class CodexAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
                 env=env,
                 cwd=session.cwd_path,
             )
-            stdout, stderr = await proc.communicate(prompt.encode("utf-8"))
+            stdout, stderr = await communicate_with_stall_detection(
+                proc,
+                input_data=prompt.encode("utf-8"),
+                stall_timeout_seconds=self.stall_timeout_seconds,
+                process_label="Codex CLI",
+            )
             stdout_output = stdout.decode()
             stderr_output = stderr.decode()
             if proc.returncode != 0:
@@ -76,6 +92,7 @@ class CodexAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
                 output_path,
                 session.backend_id,
             )
+            self.sync_isolated_provider_credential("codex", session.account_id, temp_dir)
 
             return TurnResult(
                 output=output_text,
@@ -88,8 +105,7 @@ class CodexAdapter(ProviderAdapter, ConfigIsolationMixin, CliRuntimeMixin):
 
         finally:
             if proc is not None and proc.returncode is None:
-                proc.terminate()
-                await proc.wait()
+                await terminate_process(proc)
 
     async def resume_session(self, backend_id: str) -> Session:
         """Returns a session object representing the resumed backend_id."""

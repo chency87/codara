@@ -1,10 +1,10 @@
+import asyncio
 import base64
 import hashlib
 import hmac
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, APIRouter, Depends, Query, Request, Security, status, UploadFile, File, Form
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 import json
 import os
@@ -35,11 +35,13 @@ from codara.accounts.pool import AccountPool
 from codara.accounts.vault import CredentialVault
 from codara.runtime_log_store import RuntimeLogStore
 from codara.channels.service import ChannelService
-from codara.channels.telegram import TelegramChannelAdapter
+from codara.channels.telegram import TelegramChannelAdapter, TelegramPollingManager, register_telegram_bot_commands
 from codara.telemetry import current_request_id, current_trace_id, record_event, start_span, start_trace
 from codara.workspace.engine import WorkspaceEngine
 from codara.workspace.manager import WorkspaceManager
+from codara.workspace.project import PROJECT_TEMPLATES, ProjectService
 from codara.services.inference import AttachmentInput, InferenceService
+from codara.version import check_for_update, get_version
 
 # --- Models for Management API ---
 
@@ -50,6 +52,8 @@ class ManagementResponse(BaseModel):
     error: Optional[dict] = None
 
 settings = get_settings()
+telegram_polling_manager: Optional[TelegramPollingManager] = None
+_VERSION_CHECK_CACHE: dict[str, Any] = {}
 
 TAG_INFERENCE = "Inference"
 TAG_USER_SELF_SERVICE = "User Self-Service"
@@ -57,6 +61,7 @@ TAG_PLAYGROUND = "Playground"
 TAG_MANAGEMENT_AUTH = "Management Authentication"
 TAG_MANAGEMENT_USERS = "Management Users"
 TAG_MANAGEMENT_WORKSPACES = "Management Workspaces"
+TAG_MANAGEMENT_PROJECTS = "Management Projects"
 TAG_MANAGEMENT_SESSIONS = "Management Sessions"
 TAG_MANAGEMENT_ACCOUNTS = "Management Accounts"
 TAG_MANAGEMENT_USAGE = "Management Usage"
@@ -87,6 +92,10 @@ OPENAPI_TAGS = [
     {
         "name": TAG_MANAGEMENT_WORKSPACES,
         "description": "Inventory and lifecycle management for provisioned workspaces.",
+    },
+    {
+        "name": TAG_MANAGEMENT_PROJECTS,
+        "description": "User-facing project aliases backed by managed workspaces.",
     },
     {
         "name": TAG_MANAGEMENT_SESSIONS,
@@ -727,6 +736,10 @@ def _workspace_manager() -> WorkspaceManager:
     )
 
 
+def _project_service() -> ProjectService:
+    return ProjectService(_workspace_manager())
+
+
 def _inference_service() -> InferenceService:
     return InferenceService(db_manager, orchestrator, settings)
 
@@ -751,6 +764,42 @@ def _telegram_adapter(bot_name: str) -> TelegramChannelAdapter:
         channel_config=settings.channels.telegram,
         bot_config=bot,
     )
+
+
+def _telegram_polling_manager() -> Optional[TelegramPollingManager]:
+    if not settings.channels.telegram.enabled or settings.channels.telegram.receive_mode != "polling":
+        return None
+    adapters: list[TelegramChannelAdapter] = []
+    for bot in settings.channels.telegram.bots:
+        if not bot.enabled:
+            continue
+        adapters.append(
+            TelegramChannelAdapter(
+                _channel_service(),
+                channel_config=settings.channels.telegram,
+                bot_config=bot,
+            )
+        )
+    if not adapters:
+        return None
+    return TelegramPollingManager(adapters)
+
+
+def _telegram_adapters_for_enabled_bots() -> list[TelegramChannelAdapter]:
+    if not settings.channels.telegram.enabled:
+        return []
+    adapters: list[TelegramChannelAdapter] = []
+    for bot in settings.channels.telegram.bots:
+        if not bot.enabled:
+            continue
+        adapters.append(
+            TelegramChannelAdapter(
+                _channel_service(),
+                channel_config=settings.channels.telegram,
+                bot_config=bot,
+            )
+        )
+    return adapters
 
 
 def _validate_direct_workspace_root(workspace_root: Optional[str]) -> str:
@@ -798,6 +847,7 @@ def _serialize_workspace(record: dict, *, include_details: bool = False) -> dict
     payload = {
         "workspace_id": _encode_workspace_id(record["path"]),
         "name": record["name"],
+        "project": record.get("project"),
         "path": record["path"],
         "relative_path": record["relative_path"],
         "exists": record["exists"],
@@ -1076,6 +1126,25 @@ auth_router = APIRouter(prefix="/management/v1/auth")
 user_router = APIRouter(prefix="/v1/user")
 channel_router = APIRouter(prefix="/channels")
 
+
+@app.on_event("startup")
+async def startup_channel_workers():
+    global telegram_polling_manager
+    await register_telegram_bot_commands(_telegram_adapters_for_enabled_bots())
+    manager = _telegram_polling_manager()
+    telegram_polling_manager = manager
+    if manager is not None:
+        await manager.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_channel_workers():
+    global telegram_polling_manager
+    manager = telegram_polling_manager
+    telegram_polling_manager = None
+    if manager is not None:
+        await manager.stop()
+
 # --- Common Helper ---
 
 def envelope(data: Any = None, meta: dict = None):
@@ -1091,10 +1160,71 @@ def envelope(data: Any = None, meta: dict = None):
     }
 
 
+DASHBOARD_POLL_HEADER = "x-codara-dashboard-poll"
+
+
+def _is_truthy_header(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_quiet_dashboard_poll(request: Request) -> bool:
+    if request.method.upper() != "GET":
+        return False
+    if not _is_truthy_header(request.headers.get(DASHBOARD_POLL_HEADER)):
+        return False
+    return request.url.path.startswith("/management/v1/")
+
+
+async def _handle_quiet_dashboard_poll(request: Request, call_next, request_id: str):
+    path = request.url.path
+    started = perf_counter()
+    request.state.request_id = request_id
+    request.state.trace_id = None
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        record_event(
+            "http.dashboard_poll.failed",
+            component="gateway.http",
+            db=db_manager,
+            level="ERROR",
+            status="error",
+            attributes={
+                "method": request.method,
+                "path": path,
+                "duration_ms": round((perf_counter() - started) * 1000, 2),
+                "error": str(exc),
+                "exception_type": exc.__class__.__name__,
+            },
+        )
+        raise
+
+    response.headers["X-Trace-Id"] = ""
+    response.headers["X-Request-Id"] = request_id
+    if response.status_code >= 500:
+        record_event(
+            "http.dashboard_poll.failed",
+            component="gateway.http",
+            db=db_manager,
+            level="ERROR",
+            status="error",
+            attributes={
+                "method": request.method,
+                "path": path,
+                "status_code": response.status_code,
+                "duration_ms": round((perf_counter() - started) * 1000, 2),
+            },
+        )
+    return response
+
+
 @app.middleware("http")
 async def telemetry_http_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-Id") or f"req_{uuid4().hex[:12]}"
     path = request.url.path
+    if _is_quiet_dashboard_poll(request):
+        return await _handle_quiet_dashboard_poll(request, call_next, request_id)
+
     async with start_trace(
         "http.request",
         component="gateway.http",
@@ -1207,6 +1337,13 @@ class CreateChannelLinkTokenRequest(BaseModel):
     channel: str
     bot_name: Optional[str] = None
     expires_in_minutes: int = 30
+
+
+class CreateProjectRequest(BaseModel):
+    name: str
+    template: str = "default"
+    default_provider: Optional[ProviderType] = None
+    force: bool = False
 
 
 class OperatorTokenRequest(BaseModel):
@@ -1671,6 +1808,47 @@ async def delete_workspace(workspace_id: str, current_operator: dict = Depends(g
     })
 
 
+@management_router.get("/projects", tags=[TAG_MANAGEMENT_PROJECTS], summary="List managed projects")
+async def list_projects():
+    records = _project_service().list_projects()
+    return envelope([_serialize_workspace(record) for record in records])
+
+
+@management_router.post("/projects", tags=[TAG_MANAGEMENT_PROJECTS], summary="Create a managed project")
+async def create_project(request: CreateProjectRequest, current_operator: dict = Depends(get_current_operator)):
+    try:
+        result = _project_service().create_project(
+            request.name,
+            template=request.template,
+            default_provider=request.default_provider.value if request.default_provider else None,
+            force=request.force,
+            created_by=f"operator:{current_operator['id']}",
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    record = _workspace_manager().get_workspace(result.path)
+    db_manager.record_audit(
+        actor=f"operator:{current_operator['id']}",
+        action="project.created" if result.created else "project.initialized",
+        target_type="project",
+        target_id=result.name,
+        after=result.to_dict(),
+    )
+    payload = _serialize_workspace(record, include_details=True) if record else result.to_dict()
+    return envelope(payload, meta={"templates": sorted(PROJECT_TEMPLATES)})
+
+
+@management_router.get("/projects/{project_id}", tags=[TAG_MANAGEMENT_PROJECTS], summary="Get a managed project")
+async def get_project_detail(project_id: str):
+    record = _project_service().get_project(_decode_workspace_id(project_id))
+    if not record:
+        raise HTTPException(404, "Project not found")
+    return envelope(_serialize_workspace(record, include_details=True))
+
+
 @management_router.get("/users/{user_id}/usage", tags=[TAG_MANAGEMENT_USERS], summary="Get usage for a user")
 async def get_user_usage(user_id: str):
     return envelope(db_manager.get_user_usage(user_id))
@@ -1978,6 +2156,52 @@ def _health_components() -> dict:
     }
 
 
+async def _version_payload(*, check_updates: bool = False) -> dict:
+    current = get_version()
+    payload = {
+        "name": "codara",
+        "version": current,
+        "release_check": {
+            "enabled": settings.release_check_enabled,
+            "repository": settings.release_repository,
+            "status": "disabled" if not settings.release_check_enabled else "not_checked",
+            "current_version": current,
+            "latest_version": None,
+            "update_available": False,
+            "release_url": None,
+            "error": None,
+        },
+    }
+    if not check_updates or not settings.release_check_enabled:
+        return payload
+    cache_key = "|".join(
+        [
+            str(settings.release_repository or ""),
+            str(settings.release_api_base_url),
+            current,
+        ]
+    )
+    now = perf_counter()
+    cached = _VERSION_CHECK_CACHE.get(cache_key)
+    if cached and now - cached["checked_perf"] < max(0, int(settings.release_check_cache_ttl_seconds)):
+        payload["release_check"] = dict(cached["data"])
+        payload["release_check"]["cached"] = True
+        return payload
+    result = await asyncio.to_thread(
+        check_for_update,
+        repository=settings.release_repository,
+        current_version=current,
+        api_base_url=settings.release_api_base_url,
+        timeout_seconds=settings.release_check_timeout_seconds,
+    )
+    release_check = result.to_dict()
+    release_check["cached"] = False
+    _VERSION_CHECK_CACHE.clear()
+    _VERSION_CHECK_CACHE[cache_key] = {"checked_perf": now, "data": release_check}
+    payload["release_check"] = release_check
+    return payload
+
+
 @management_router.get("/health", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get overall management-plane health")
 async def health_check():
     checked_at = datetime.now(timezone.utc).isoformat()
@@ -2003,6 +2227,11 @@ async def management_provider_models(provider: Optional[ProviderType] = None):
     return envelope(await _list_provider_models(provider))
 
 
+@management_router.get("/version", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get Codara version and optional update status")
+async def management_version(check_updates: bool = Query(default=False)):
+    return envelope(await _version_payload(check_updates=check_updates))
+
+
 @management_router.get("/overview", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get the dashboard overview payload")
 async def management_overview():
     checked_at = datetime.now(timezone.utc).isoformat()
@@ -2010,6 +2239,7 @@ async def management_overview():
     components = _health_components()
     recent_audit = db_manager.get_audit_logs(limit=6)
     provider_rows = await _provider_health_rows()
+    version_info = await _version_payload(check_updates=settings.release_check_enabled)
     health = {
         "status": "degraded" if any(component["status"] != "ok" for component in components.values()) else "ok",
         "components": components,
@@ -2026,6 +2256,7 @@ async def management_overview():
             "session_ttl_hours": settings.session_ttl_hours,
             "codex_usage_endpoints": settings.codex_usage_endpoints.split(","),
         },
+        "version": version_info,
     })
 
 
@@ -2544,9 +2775,55 @@ app.include_router(channel_router)
 
 # --- Static Dashboard ---
 
-ui_dist_path = os.path.join(os.getcwd(), "ui", "dist")
-if os.path.exists(ui_dist_path):
-    app.mount("/dashboard", StaticFiles(directory=ui_dist_path, html=True), name="dashboard")
+def _dashboard_dist_path() -> Path:
+    return Path(os.getcwd()) / "ui" / "dist"
+
+
+def _safe_dashboard_file(dashboard_path: str) -> Optional[Path]:
+    dist_path = _dashboard_dist_path().resolve()
+    candidate = (dist_path / dashboard_path).resolve()
+    if candidate != dist_path and dist_path not in candidate.parents:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _is_dashboard_asset_path(dashboard_path: str) -> bool:
+    normalized = dashboard_path.strip("/")
+    return normalized.startswith("assets/") or bool(Path(normalized).suffix)
+
+
+def _dashboard_index_file() -> Path:
+    return _dashboard_dist_path() / "index.html"
+
+
+def _dashboard_response(dashboard_path: str = ""):
+    index_file = _dashboard_index_file()
+    if not index_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Dashboard build not found. Run `cd ui && npm run build` or start `codara serve --build-ui`.",
+        )
+
+    if dashboard_path:
+        static_file = _safe_dashboard_file(dashboard_path)
+        if static_file:
+            return FileResponse(static_file)
+        if _is_dashboard_asset_path(dashboard_path):
+            raise HTTPException(status_code=404, detail="Dashboard asset not found")
+
+    return FileResponse(index_file)
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard_root():
+    return _dashboard_response()
+
+
+@app.get("/dashboard/{dashboard_path:path}", include_in_schema=False)
+async def dashboard_spa(dashboard_path: str):
+    return _dashboard_response(dashboard_path)
 
 @app.get("/", include_in_schema=False)
 async def root_redirect():
