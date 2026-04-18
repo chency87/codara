@@ -358,7 +358,7 @@ Each provider has a dedicated adapter translating UAG JSON to provider-native CL
 │    │ {                                                                     │
 │    │   model: "uag-codex-v5",                                              │
 │    │   messages: [...],                                                   │
-│    │   uag_options: {provider, workspace_root, client_session_id}        │
+│    │   provider, workspace_root, client_session_id                       │
 │    │ }                                                                     │
 │    ▼                                                                      │
 │ ┌────────────────────────────────────────────────────────────────────┐   │
@@ -757,7 +757,7 @@ CREATE INDEX idx_resets_user ON workspace_resets(user_id);
 
 Standard OpenAI-compatible request with UAG extensions. Provisioned user
 clients send their bearer API key directly to this endpoint and only provide
-the minimal `uag_options` they actually control.
+the minimal Codara fields they actually control.
 
 **Request:**
 ```json
@@ -766,11 +766,9 @@ the minimal `uag_options` they actually control.
   "messages": [
     {"role": "user", "content": "Refactor the auth module to use JWT."}
   ],
-  "uag_options": {
-    "provider": "codex",
-    "workspace_id": "project-a",
-    "client_session_id": "thread-1"
-  }
+  "provider": "codex",
+  "workspace_id": "project-a",
+  "client_session_id": "thread-1"
 }
 ```
 
@@ -780,7 +778,7 @@ one or more files in the same request. The gateway writes those uploads into
 the resolved workspace under `.uag/uploads/<session-scope>/...` and prepends a
 system message with the relative paths so the downstream CLI can read them.
 
-**`uag_options` Field Reference:**
+**Codara Request Field Reference:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

@@ -10,7 +10,7 @@
 # /data, /config, /logs, and /workspaces.
 # ---------------------------------------------------------------------------
 
-FROM node:20-alpine AS ui-builder
+FROM node:24-alpine AS ui-builder
 
 WORKDIR /app/ui
 
@@ -19,9 +19,6 @@ RUN npm ci
 
 COPY ui/ ./
 RUN npm run build
-
-
-FROM node:20-bookworm-slim AS node-runtime
 
 
 FROM python:3.12-slim AS python-builder
@@ -48,14 +45,19 @@ FROM python:3.12-slim AS runtime
 ARG CODEX_CLI_PACKAGE="@openai/codex@latest"
 ARG GEMINI_CLI_PACKAGE="@google/gemini-cli@latest"
 ARG OPENCODE_CLI_PACKAGE="opencode-ai@latest"
-ARG PNPM_VERSION="latest"
+ARG PNPM_PACKAGE="pnpm@latest"
+ARG NODE_VERSION="24"
+ARG NVM_VERSION="0.40.3"
 ARG USERNAME="codara"
 ARG USER_UID=1000
 ARG USER_GID=1000
 
+
 ENV VIRTUAL_ENV=/app/.venv \
+    NVM_DIR=/home/${USERNAME}/.nvm \
+    NVM_SYMLINK_CURRENT=true \
     UV_TOOL_BIN_DIR=/home/${USERNAME}/.local/bin \
-    PATH="/app/.venv/bin:/home/${USERNAME}/.local/bin:$PATH" \
+    PATH="/home/${USERNAME}/.nvm/current/bin:/app/.venv/bin:/home/${USERNAME}/.local/bin:$PATH" \
     HOME=/home/${USERNAME} \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -123,22 +125,26 @@ RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
 
 WORKDIR /app
 
-COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-runtime /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=node-runtime /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node-runtime /usr/local/bin/corepack /usr/local/bin/corepack
-COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/.venv /app/.venv
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/src /app/src
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/pyproject.toml /app/README.md ./
 COPY --from=ui-builder --chown=${USER_UID}:${USER_GID} /app/ui/dist /app/ui/dist
 
-RUN npm install -g \
+USER ${USERNAME}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN mkdir -p "$NVM_DIR" \
+    && curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" | bash \
+    && . "$NVM_DIR/nvm.sh" \
+    && nvm install "$NODE_VERSION" \
+    && nvm alias default "$NODE_VERSION" \
+    && nvm use default \
+    && npm install -g \
         "${CODEX_CLI_PACKAGE}" \
         "${GEMINI_CLI_PACKAGE}" \
         "${OPENCODE_CLI_PACKAGE}" \
-    && corepack enable \
-    && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+        "${PNPM_PACKAGE}" \
     && npm cache clean --force \
     && node --version \
     && npm --version \
@@ -147,8 +153,6 @@ RUN npm install -g \
     && command -v gemini \
     && command -v opencode
 
-USER ${USERNAME}
-
 RUN printf '%s\n' \
         'export HISTFILE=$HOME/.history/.bash_history' \
         'export HISTSIZE=10000' \
@@ -156,7 +160,9 @@ RUN printf '%s\n' \
         'export HISTCONTROL=ignoredups:erasedups' \
         'shopt -s histappend' \
         'PROMPT_COMMAND="history -a; history -c; history -r"' \
-        'export PATH=/app/.venv/bin:$HOME/.local/bin:$PATH' \
+        'export NVM_DIR=$HOME/.nvm' \
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' \
+        'export PATH=$NVM_DIR/current/bin:/app/.venv/bin:$HOME/.local/bin:$PATH' \
         '[[ $- == *i* ]] && bind "\e[A":history-search-backward' \
         '[[ $- == *i* ]] && bind "\e[B":history-search-forward' \
         > "$HOME/.bashrc" \
