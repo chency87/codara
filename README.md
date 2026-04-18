@@ -194,11 +194,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{
     "model": "gpt-5-codex",
     "messages": [{"role": "user", "content": "Review this repo."}],
-    "uag_options": {
-      "provider": "codex",
-      "workspace_root": "/absolute/path/to/project",
-      "client_session_id": "thread-1"
-    }
+    "provider": "codex",
+    "workspace_root": "/absolute/path/to/project",
+    "client_session_id": "thread-1"
   }'
 ```
 
@@ -216,11 +214,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{
     "model": "gemini-2.5-pro",
     "messages": [{"role": "user", "content": "Review my changes."}],
-    "uag_options": {
-      "provider": "gemini",
-      "workspace_id": "project-a/feature-x",
-      "client_session_id": "thread-1"
-    }
+    "provider": "gemini",
+    "workspace_id": "project-a/feature-x",
+    "client_session_id": "thread-1"
   }'
 ```
 

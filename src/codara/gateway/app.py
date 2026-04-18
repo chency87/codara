@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import List, Optional, Any
-from pydantic import BaseModel, ConfigDict, Field, AliasChoices, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, AliasChoices, ValidationError, model_validator
 from uuid import uuid4
 
 from codara.core.models import (
@@ -474,11 +474,12 @@ async def _execute_user_bound_chat(
     default_session_label: Optional[str] = None,
     uploaded_files: Optional[list[UploadFile]] = None,
 ):
+    options = chat_request.normalized_options()
     attachment_inputs = await _attachment_inputs_from_uploads(uploaded_files or [])
     result, workspace_root, workspace_id, attachments = await _inference_service().execute_user_turn(
         model=chat_request.model,
         messages=chat_request.messages,
-        options=chat_request.uag_options,
+        options=options,
         user=user,
         api_key=api_key,
         default_session_label=default_session_label,
@@ -1289,11 +1290,9 @@ class ChatCompletionRequest(BaseModel):
                             "content": "Review the auth module and suggest improvements.",
                         }
                     ],
-                    "uag_options": {
-                        "provider": "codex",
-                        "workspace_id": "project-a",
-                        "client_session_id": "thread-1",
-                    },
+                    "provider": "codex",
+                    "workspace_id": "project-a",
+                    "client_session_id": "thread-1",
                 }
             ]
         }
@@ -1306,13 +1305,72 @@ class ChatCompletionRequest(BaseModel):
         )
     )
     messages: List[Message] = Field(description="OpenAI-compatible conversation messages.")
-    uag_options: UagOptions = Field(
+    provider: ProviderType = Field(
         description=(
-            "Runtime options. For verified user API keys, most clients only need `provider` plus optional "
-            "`workspace_id` and `client_session_id`. Omit `workspace_root` because the gateway resolves it from "
-            "the verified user workspace."
+            "Target provider runtime. For verified user API keys, most clients only need this plus optional "
+            "`workspace_id` and `client_session_id`."
         )
     )
+    workspace_root: Optional[str] = Field(
+        default=None,
+        description=(
+            "Operator/internal only. Absolute workspace path for direct operator requests. "
+            "Verified user-key requests should omit this because the gateway resolves the user's bound workspace root."
+        ),
+    )
+    workspace_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional logical workspace selector beneath a provisioned user workspace. "
+            "Use this when a user wants multiple isolated sub-workspaces; omit it to use the default workspace."
+        ),
+    )
+    session_persistence: bool = Field(
+        default=True,
+        description="Advanced. When true, the gateway reuses and persists session state for the client session id.",
+    )
+    manual_mode: bool = Field(
+        default=False,
+        description=(
+            "Advanced. When true, the runtime returns ATR actions instead of applying workspace diffs automatically."
+        ),
+    )
+    client_session_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional stable session label for turn resumption. For user-key requests the gateway namespaces this "
+            "with the verified user and workspace."
+        ),
+    )
+    uag_options: Optional[UagOptions] = Field(
+        default=None,
+        exclude=True,
+        description="Deprecated compatibility wrapper. Send Codara-specific request fields at top level instead.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_legacy_uag_options(cls, data: Any):
+        if not isinstance(data, dict):
+            return data
+        legacy = data.get("uag_options")
+        if not isinstance(legacy, dict):
+            return data
+        merged = dict(data)
+        for key in ("provider", "workspace_root", "workspace_id", "session_persistence", "manual_mode", "client_session_id"):
+            if merged.get(key) is None and key in legacy:
+                merged[key] = legacy[key]
+        return merged
+
+    def normalized_options(self) -> UagOptions:
+        return UagOptions(
+            provider=self.provider,
+            workspace_root=self.workspace_root,
+            workspace_id=self.workspace_id,
+            session_persistence=self.session_persistence,
+            manual_mode=self.manual_mode,
+            client_session_id=self.client_session_id,
+        )
 
 
 class CreateUserRequest(BaseModel):
@@ -1381,6 +1439,7 @@ async def chat_completions(
 ):
     try:
         chat_request, uploaded_files = await _parse_chat_request(http_request)
+        options = chat_request.normalized_options()
         authorization = http_request.headers.get("authorization", "")
         if authorization.startswith("Bearer uagk_"):
             user_context = await get_current_user(http_request)
@@ -1394,48 +1453,48 @@ async def chat_completions(
             )
         elif authorization == f"Bearer {_operator_passkey()}":
             # Allow direct use of operator passkey as a bearer token for internal/automated turns
-            chat_request.uag_options.workspace_root = _validate_direct_workspace_root(
-                chat_request.uag_options.workspace_root
+            options.workspace_root = _validate_direct_workspace_root(
+                options.workspace_root
             )
             attachments = await _materialize_chat_uploads(
-                chat_request.uag_options.workspace_root,
+                options.workspace_root,
                 chat_request.messages,
                 uploaded_files,
-                session_label=chat_request.uag_options.client_session_id,
+                session_label=options.client_session_id,
             )
             provider_model = resolve_provider_model(
-                chat_request.uag_options.provider,
+                options.provider,
                 chat_request.model,
                 settings,
             )
             result = await orchestrator.handle_request(
-                chat_request.uag_options,
+                options,
                 chat_request.messages,
                 provider_model=provider_model,
             )
         else:
-            chat_request.uag_options.workspace_root = _validate_direct_workspace_root(
-                chat_request.uag_options.workspace_root
+            options.workspace_root = _validate_direct_workspace_root(
+                options.workspace_root
             )
             attachments = await _materialize_chat_uploads(
-                chat_request.uag_options.workspace_root,
+                options.workspace_root,
                 chat_request.messages,
                 uploaded_files,
-                session_label=chat_request.uag_options.client_session_id,
+                session_label=options.client_session_id,
             )
             provider_model = resolve_provider_model(
-                chat_request.uag_options.provider,
+                options.provider,
                 chat_request.model,
                 settings,
             )
             result = await orchestrator.handle_request(
-                chat_request.uag_options,
+                options,
                 chat_request.messages,
                 provider_model=provider_model,
             )
         return _build_chat_completion_response(
             chat_request.model,
-            chat_request.uag_options,
+            options,
             result,
             extra_extensions={"attachments": attachments},
         )
@@ -1857,8 +1916,9 @@ async def get_user_usage(user_id: str):
 @management_router.post("/playground/chat", tags=[TAG_PLAYGROUND], summary="Run a playground chat turn")
 async def management_playground_chat(http_request: Request, current_operator: dict = Depends(get_current_operator)):
     chat_request, uploaded_files = await _parse_chat_request(http_request)
+    options = chat_request.normalized_options()
     admin_user, api_key = _ensure_dashboard_admin_user()
-    _bootstrap_playground_provider_account(chat_request.uag_options.provider)
+    _bootstrap_playground_provider_account(options.provider)
 
     try:
         result, workspace_root, workspace_id, attachments = await _execute_user_bound_chat(
@@ -1876,15 +1936,15 @@ async def management_playground_chat(http_request: Request, current_operator: di
         target_type="user",
         target_id=admin_user.user_id,
         after={
-            "provider": chat_request.uag_options.provider.value,
+            "provider": options.provider.value,
             "workspace_id": workspace_id,
-            "client_session_id": chat_request.uag_options.client_session_id,
+            "client_session_id": options.client_session_id,
             "reported_context_tokens": result.context_tokens,
         },
     )
     return _build_chat_completion_response(
         chat_request.model,
-        chat_request.uag_options,
+        options,
         result,
         extra_extensions={
             "bound_user_id": admin_user.user_id,

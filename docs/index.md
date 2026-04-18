@@ -108,7 +108,7 @@ OpenAI-compatible response + Codara extensions
 Direct/operator turns are allowed, but their `workspace_root` must pass the workspace safe-zone policy before execution.
 
 ```text
-Client request with uag_options.workspace_root
+Client request with top-level workspace_root
    │
    ▼
 Gateway validates path against workspaces_root

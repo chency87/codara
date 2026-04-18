@@ -242,20 +242,20 @@ Response returns the raw new key once only; there is no overlap window with the 
 
 ### 4.1 How User Identity Drives Caching
 
-When a request arrives with a valid API key, the Gateway injects the user's `workspace_path` into `uag_options.workspace_root` before forwarding to the Orchestrator. By default the base workspace is used directly, but the client may also provide a logical `workspace_id` to select a stable sub-workspace under that base path.
+When a request arrives with a valid API key, the Gateway injects the user's `workspace_path` into the normalized runtime `workspace_root` before forwarding to the Orchestrator. By default the base workspace is used directly, but the client may also provide a logical `workspace_id` to select a stable sub-workspace under that base path.
 
 ```
 Incoming request:
   POST /v1/chat/completions
   Authorization: Bearer uagk_live_...
-  { "model": "uag-codex-v5", "messages": [...], "uag_options": { "workspace_id": "project-a" } }
+  { "model": "uag-codex-v5", "messages": [...], "provider": "codex", "workspace_id": "project-a" }
 
 After key validation, Gateway enriches:
-  uag_options.workspace_root  = "/var/uag/workspaces/uag_usr_01HXYZ.../project-a"
-  uag_options.workspace_id    = "project-a"
-  uag_options.client_session_id = "<user_id>::<workspace_id>::<client_provided_session_id_or_default>"
-  uag_options.user_id         = "<user_id>"
-  uag_options.api_key_id      = "<resolved_key_id>"
+  workspace_root  = "/var/uag/workspaces/uag_usr_01HXYZ.../project-a"
+  workspace_id    = "project-a"
+  client_session_id = "<user_id>::<workspace_id>::<client_provided_session_id_or_default>"
+  user_id         = "<user_id>"
+  api_key_id      = "<resolved_key_id>"
 ```
 
 The `client_session_id` is namespaced with the user's ID and workspace ID to prevent collisions between users or between separate workspaces owned by the same user.
@@ -288,7 +288,7 @@ client_session_id = "{user_id}::{workspace_id}::{session_label}"
 Where `workspace_id` defaults to `"default"` and `session_label` defaults to `"default"` if the client does not provide them. A user who wants multiple parallel workstreams can pass distinct labels inside a stable workspace:
 
 ```json
-{ "uag_options": { "workspace_id": "project-a", "client_session_id": "feature-branch-auth" } }
+{ "provider": "codex", "workspace_id": "project-a", "client_session_id": "feature-branch-auth" }
 ```
 
 This generates `client_session_id = "uag_usr_01HXYZ...::project-a::feature-branch-auth"`, keeping each workstream's context separate while still reusing the same workspace-aware cache surface for that project.

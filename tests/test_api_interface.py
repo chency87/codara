@@ -65,11 +65,9 @@ def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, mon
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {
-                "provider": "gemini",
-                "workspace_root": str(workspace),
-                "client_session_id": "thread-1",
-            },
+            "provider": "gemini",
+            "workspace_root": str(workspace),
+            "client_session_id": "thread-1",
         },
     )
 
@@ -97,7 +95,8 @@ def test_chat_completions_rejects_direct_workspace_outside_safe_zone(tmp_path, m
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "gemini", "workspace_root": str(outside)},
+            "provider": "gemini",
+            "workspace_root": str(outside),
         },
     )
 
@@ -126,7 +125,8 @@ def test_chat_completions_rejects_isolated_envs_workspace(tmp_path, monkeypatch)
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "gemini", "workspace_root": str(isolated_workspace)},
+            "provider": "gemini",
+            "workspace_root": str(isolated_workspace),
         },
     )
 
@@ -158,9 +158,56 @@ def test_chat_completions_rejects_operator_workspace_traversal_outside_safe_zone
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "gemini", "workspace_root": str(traversal)},
+            "provider": "gemini",
+            "workspace_root": str(traversal),
         },
     )
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "workspace_access_denied"
+
+
+def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, monkeypatch):
+    db_path = tmp_path / "codara.db"
+    workspaces_root = tmp_path / "workspaces"
+    workspace = workspaces_root / "project-a"
+    workspace.mkdir(parents=True)
+
+    monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
+    gateway_app.settings.secret_key = "unit-test-secret"
+    gateway_app.clear_auth_caches()
+    gateway_app.settings.workspaces_root = str(workspaces_root)
+    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
+    gateway_app.db_manager = DatabaseManager(str(db_path))
+    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
+
+    observed = {}
+
+    async def fake_handle_request(options, messages, provider_model=None):
+        observed["workspace_root"] = options.workspace_root
+        observed["provider"] = options.provider.value
+        observed["client_session_id"] = options.client_session_id
+        return TurnResult(output="ok", backend_id="sess-1", finish_reason="stop")
+
+    monkeypatch.setattr(gateway_app.orchestrator, "handle_request", fake_handle_request)
+
+    client = TestClient(gateway_app.app)
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+            "uag_options": {
+                "provider": "gemini",
+                "workspace_root": str(workspace),
+                "client_session_id": "thread-legacy",
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    assert observed == {
+        "workspace_root": str(workspace.resolve()),
+        "provider": "gemini",
+        "client_session_id": "thread-legacy",
+    }

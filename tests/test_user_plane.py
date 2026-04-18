@@ -134,7 +134,7 @@ def test_chat_completions_keeps_http_401_for_revoked_key(tmp_path, monkeypatch):
         json={
             "model": "uag-codex-v5",
             "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "codex"},
+            "provider": "codex",
         },
     )
 
