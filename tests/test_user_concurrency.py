@@ -1,10 +1,9 @@
-from datetime import datetime, timedelta
+from codara.core.models import Session, ProviderType, SessionStatus
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
 import codara.gateway.app as gateway_app
-from codara.accounts.pool import AccountPool
-from codara.core.models import Account, AuthType, ProviderType, Session, SessionStatus
 from codara.database.manager import DatabaseManager
 from codara.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
@@ -21,15 +20,6 @@ def test_chat_completions_reject_when_user_hits_concurrency_limit(tmp_path, monk
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
-    AccountPool(gateway_app.db_manager).register_account(
-        Account(
-            account_id="codex-ready",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Ready",
-        ),
-        "sk-ready",
-    )
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client)
@@ -49,20 +39,24 @@ def test_chat_completions_reject_when_user_hits_concurrency_limit(tmp_path, monk
     raw_key = created["api_key"]["raw_key"]
     user_id = created["user_id"]
 
+    workspaces = gateway_app.db_manager.list_workspaces_v2(user_id=user_id)
+    workspace_id = workspaces[0].workspace_id
+
+    now = datetime.now(timezone.utc)
+    client_session_id = f"{user_id}::root::active-thread"
     gateway_app.db_manager.save_session(
         Session(
-            client_session_id=f"{user_id}::root::active-thread",
+            session_id=client_session_id,
+            workspace_id=workspace_id,
+            client_session_id=client_session_id,
             backend_id="backend-1",
             provider=ProviderType.CODEX,
-            account_id="codex-ready",
             user_id=user_id,
-            api_key_id=created["api_key"]["key_id"],
             cwd_path=created["workspace_path"],
-            prefix_hash="abc",
             status=SessionStatus.ACTIVE,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=1),
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(hours=1),
         )
     )
 

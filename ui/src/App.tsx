@@ -12,28 +12,24 @@ import {
   ChevronRight,
   ShieldCheck,
   LogOut,
-  BarChart3,
   Cpu,
   FolderCode
 } from 'lucide-react';
 import axios from 'axios';
 import Overview from './pages/Overview';
 import Sessions from './pages/Sessions';
-import Accounts from './pages/Accounts';
+import Workspaces from './pages/Workspaces';
 import UsersPage from './pages/Users';
 import Providers from './pages/Providers';
-import Usage from './pages/Usage';
-import AuditLog from './pages/AuditLog';
-import Traces from './pages/Traces';
-import Logs from './pages/Logs';
-import Observability from './pages/Observability';
+import Observability from './pages/Explorer';
 import Playground from './pages/Playground';
 import Login from './pages/Login';
-import Workspaces from './pages/Workspaces';
+import AuditLog from './pages/AuditLog';
 import type { HealthStatusPayload } from './types/api';
 import { dashboardPollHeaders } from './api/dashboardPoll';
 
 // Axios interceptor for auth
+axios.defaults.withCredentials = true;
 axios.interceptors.request.use(config => {
   const token = sessionStorage.getItem('uag_token');
   if (token) {
@@ -57,8 +53,26 @@ axios.interceptors.response.use(
 );
 
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
-  const token = sessionStorage.getItem('uag_token');
-  if (!token) return <Navigate to="/login" replace />;
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['operator-me'],
+    queryFn: async () => {
+      const resp = await axios.get('/management/v1/auth/me');
+      return resp.data.data;
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <span className="text-slate-500">Checking auth...</span>
+      </div>
+    );
+  }
+  if (isError) {
+    return <Navigate to="/login" replace />;
+  }
   return <>{children}</>;
 };
 
@@ -93,6 +107,7 @@ function AppLayout() {
   });
 
   const logout = () => {
+    axios.post('/management/v1/auth/logout').catch(() => {});
     sessionStorage.removeItem('uag_token');
     sessionStorage.removeItem('uag_refresh_token');
     navigate('/login');
@@ -130,20 +145,15 @@ function AppLayout() {
             <SidebarItem to="/playground" icon={Terminal} label="Agent Playground" />
             <SidebarItem to="/sessions" icon={Activity} label="Active Sessions" />
             <SidebarItem to="/workspaces" icon={FolderCode} label="Workspaces" />
-            <SidebarItem to="/accounts" icon={ShieldCheck} label="Account Pool" />
             <SidebarItem to="/users" icon={Users} label="Users" />
           </nav>
         </div>
 
-        <div className="px-6 mb-4">
-          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-4">Observability</div>
-          <nav className="space-y-1">
+        <nav className="space-y-1">
             <SidebarItem to="/providers" icon={Cpu} label="Providers" />
-            <SidebarItem to="/usage" icon={BarChart3} label="Usage Metrics" />
-            <SidebarItem to="/observability" icon={Activity} label="Observability" />
+            <SidebarItem to="/explorer" icon={Activity} label="Explorer" />
             <SidebarItem to="/audit" icon={History} label="Audit Logs" />
           </nav>
-        </div>
         
         <div className="mt-auto p-6 space-y-4">
           <button 
@@ -174,13 +184,9 @@ function AppLayout() {
           <Route path="/playground" element={<Playground />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/workspaces" element={<Workspaces />} />
-          <Route path="/accounts" element={<Accounts />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/providers" element={<Providers />} />
-          <Route path="/usage" element={<Usage />} />
-          <Route path="/observability" element={<Observability />} />
-          <Route path="/traces" element={<Traces />} />
-          <Route path="/logs" element={<Logs />} />
+          <Route path="/explorer" element={<Observability />} />
           <Route path="/audit" element={<AuditLog />} />
         </Routes>
       </main>

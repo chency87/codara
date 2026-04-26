@@ -49,18 +49,6 @@ CREATE TABLE api_keys (
     revoked_at      INTEGER                           -- NULL if not revoked
 );
 
--- Per-user usage accounting (updated by UsageMonitor)
-CREATE TABLE user_usage (
-    user_id         TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    period          TEXT        NOT NULL,             -- ISO date: '2026-04-12'
-    provider        TEXT        NOT NULL,             -- 'codex' | 'gemini' | 'opencode'
-    input_tokens    INTEGER     NOT NULL DEFAULT 0,
-    output_tokens   INTEGER     NOT NULL DEFAULT 0,
-    cache_hit_tokens INTEGER    NOT NULL DEFAULT 0,
-    request_count   INTEGER     NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, period, provider)
-);
-
 -- Workspace reset log (append-only)
 CREATE TABLE workspace_resets (
     reset_id        TEXT        PRIMARY KEY,          -- uag_rst_<ulid>
@@ -73,7 +61,6 @@ CREATE TABLE workspace_resets (
 
 CREATE INDEX idx_api_keys_user     ON api_keys(user_id);
 CREATE INDEX idx_api_keys_hash     ON api_keys(key_hash);
-CREATE INDEX idx_user_usage_user   ON user_usage(user_id, period);
 CREATE INDEX idx_resets_user       ON workspace_resets(user_id);
 ```
 
@@ -378,41 +365,6 @@ All user-facing endpoints live under `/v1/user/`. They require a `user`-scoped A
 | `POST` | `/v1/user/workspace/reset` | Reset workspace session state |
 | `GET` | `/v1/user/workspace/resets` | List own reset history |
 
-#### Usage
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/v1/user/usage` | Own token usage, by day and provider |
-| `GET` | `/v1/user/usage/sessions/:id` | Per-session token breakdown |
-
-### 6.2 `GET /v1/user/usage` Response
-
-```json
-{
-  "ok": true,
-  "data": {
-    "window": { "from": "2026-04-05", "to": "2026-04-12" },
-    "summary": {
-      "total_input_tokens": 142000,
-      "total_output_tokens": 38000,
-      "total_cache_hit_tokens": 108000,
-      "cache_hit_rate": 0.76,
-      "total_requests": 47
-    },
-    "by_day": [
-      {
-        "date": "2026-04-12",
-        "provider": "codex",
-        "input_tokens": 18000,
-        "output_tokens": 5200,
-        "cache_hit_tokens": 14400,
-        "request_count": 6
-      }
-    ]
-  }
-}
-```
-
 ---
 
 ## 7. Self-Service Portal
@@ -450,9 +402,9 @@ Revoke opens a confirmation dialog. If the user only has one active key, the rev
 
 #### Sessions
 
-Filterable table of the user's own sessions: Label, Provider, Status, Last Active, Token Usage (input / output / cache). Clicking a row expands a detail panel showing:
+Filterable table of the user's own sessions: Label, Provider, Status, Last Active. Clicking a row expands a detail panel showing:
 
-- Turn history (index, tokens, finish reason, timestamp)
+- Turn history (index, finish reason, timestamp)
 - Most recent diff output (if available)
 - Session label and `backend_id` (for debugging)
 
@@ -471,17 +423,6 @@ Shows:
 > *"This will clear all session history and conversation context for your workspace. Files on disk will not be affected. This cannot be undone."*
 
 On confirm: calls `POST /v1/user/workspace/reset`, shows a success banner with the count of sessions wiped.
-
-#### Usage
-
-Token consumption charts matching the operator dashboard's Usage page, scoped to the current user:
-
-- Tokens per day (input / output / cache-hit, stacked bar, last 7 days)
-- Cache hit rate over time (line chart)
-- Per-provider breakdown (stacked bar)
-- Summary stats: total requests, total tokens, cache hit rate for the selected window
-
-Time range selector: 7d / 30d.
 
 ---
 
@@ -502,7 +443,6 @@ These extend the management API from the previous document with user-specific op
 | `POST` | `/management/v1/users/:id/keys/rotate` | Rotate the user's single active key and reveal the replacement once |
 | `DELETE` | `/management/v1/users/:id/keys/:key_id` | Revoke a non-active key record |
 | `POST` | `/management/v1/users/:id/workspace/reset` | Operator-initiated workspace reset |
-| `GET` | `/management/v1/users/:id/usage` | User's token usage (operator view) |
 
 These endpoints appear on the operator dashboard's Users page, which is a new page to add to the dashboard spec from the previous document.
 
@@ -522,11 +462,10 @@ This page is an addendum to the UAG API & Dashboard Design document (§3.3).
 | Status | `active` / `suspended` / `deleted` badge |
 | Active Keys | Count |
 | Active Sessions | Count |
-| Total Tokens (30d) | Aggregate from `user_usage` |
 | Created | Relative time |
 | Actions | Suspend, Reset Workspace, View Detail |
 
-**User Detail Drawer:** Opens on row click, showing full profile, key list (masked prefixes only unless a fresh raw key was just revealed), session list, usage chart (last 30 days), and reset history.
+**User Detail Drawer:** Opens on row click, showing full profile, key list (masked prefixes only unless a fresh raw key was just revealed), session list, and reset history.
 
 **Provision User button:** Opens a modal matching the `POST /management/v1/users` request shape. On success, displays a one-time reveal of the raw API key with a copy button. The drawer only copies a usable raw key while that fresh reveal is still present in browser memory; otherwise it shows the masked prefix as an identifier and instructs the operator to rotate the key.
 
@@ -557,6 +496,5 @@ In order:
 3. **Workspace provisioning** — `POST /management/v1/users` with directory creation, key generation, one-time return of raw key.
 4. **User self-service API** — `/v1/user/me`, `/v1/user/keys`, `/v1/user/workspace/reset`. Minimum viable self-service.
 5. **Session namespacing** — `{user_id}::{session_label}` composition in §4.3. Required for isolation once real users exist.
-6. **Usage accounting** — `user_usage` table writes in `UsageMonitor`. Required for the usage page and operator cost attribution.
-7. **Self-service portal** — API Keys page first (most critical for users), then Workspace, Sessions, Usage.
-8. **Operator dashboard Users page** — Addendum in §9. Builds on top of all the above.
+6. **Self-service portal** — API Keys page first (most critical for users), then Workspace and Sessions.
+7. **Operator dashboard Users page** — Addendum in §9. Builds on top of all the above.

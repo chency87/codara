@@ -5,8 +5,8 @@ Use the default `docker-compose.yml` for the current single-node deployment path
 ## Quick Start
 
 ```bash
-cp .env.example .env
-cp codara.toml.example codara.toml
+cp configs/.env.example .env
+cp configs/codara.toml.example codara.toml
 # Edit API_TOKEN and any provider/runtime settings.
 
 docker compose up --build
@@ -42,7 +42,7 @@ GHCR package visibility is controlled in GitHub package settings. After the firs
 | `codara_data` | `/data` | SQLite database |
 | `codara_config` plus `./codara.toml` | `/config` | active config, encryption master key, credential vault |
 | `codara_logs` | `/logs` | structured runtime logs and trace shards |
-| `codara_workspaces` | `/workspaces` | user workspaces and isolated provider homes |
+| `codara_workspaces` | `/workspaces` | user workspaces |
 | `redis_data` | `/data` in Redis | Redis append-only state |
 
 Important environment variables set by compose:
@@ -52,7 +52,6 @@ Important environment variables set by compose:
 - `UAG_DATABASE_PATH=/data/codara.db`
 - `UAG_LOGS_ROOT=/logs`
 - `UAG_WORKSPACES_ROOT=/workspaces`
-- `UAG_ISOLATED_ENVS_ROOT=/workspaces/isolated_envs`
 
 ## Dashboard Build
 
@@ -84,7 +83,7 @@ NODE_VERSION=24
 NVM_VERSION=0.40.3
 ```
 
-Pin these values in `.env` for reproducible production images. Keep provider auth inside Codara-managed credentials or isolated homes under `/workspaces/isolated_envs`; do not mount host auth files into `/root`, because the container runs as the non-root `codara` user.
+Pin these values in `.env` for reproducible production images. Keep provider auth inside Codara-managed credentials; do not mount host auth files into `/root`, because the container runs as the non-root `codara` user.
 
 ## Operations
 

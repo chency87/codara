@@ -22,7 +22,7 @@ class FileTraceStore:
             shard_key = self._shard_key(started_at)
             event_path = self.events_root / shard_key["event_relpath"]
             grouped_events.setdefault(event_path, []).append(json.dumps(row, ensure_ascii=True, sort_keys=True))
-            if row.get("kind") == "span" and not row.get("parent_span_id"):
+            if row.get("kind") == "span.started" and not row.get("parent_span_id"):
                 index_row = {
                     "trace_id": row.get("trace_id"),
                     "span_id": row.get("span_id"),
@@ -111,11 +111,13 @@ class FileTraceStore:
         shard_hour = trace_root.get("shard_hour")
         if not shard_hour:
             return []
-        event_path = self.events_root / shard_hour[:4] / shard_hour[5:7] / shard_hour[8:10] / f"{shard_hour[11:13]}.jsonl"
+        event_path = self.events_root / f"{shard_hour}.jsonl"
         rows: list[dict[str, Any]] = []
         for line in self._read_lines(event_path):
             row = self._parse_line(line)
-            if row is None or row.get("trace_id") != trace_id:
+            if row is None:
+                continue
+            if row.get("trace_id") != trace_id:
                 continue
             rows.append(row)
         rows.sort(key=lambda item: (int(item.get("started_at") or 0), str(item.get("event_id") or "")))

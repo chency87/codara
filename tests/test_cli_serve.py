@@ -54,41 +54,6 @@ def test_serve_warns_when_dashboard_build_is_stale(tmp_path, monkeypatch):
     assert observed == {"host": "127.0.0.1", "port": 8123}
 
 
-def test_account_add_restricts_provider_to_codex():
-    runner = CliRunner()
-
-    result = runner.invoke(
-        cli_main.cli,
-        [
-            "account",
-            "add",
-            "--id",
-            "gemini-main",
-            "--provider",
-            "gemini",
-            "--auth-type",
-            "OAUTH_SESSION",
-            "--label",
-            "Gemini Main",
-            "--credential-file",
-            __file__,
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "Invalid value for '--provider': 'gemini' is not 'codex'" in result.output
-
-
-def test_account_group_no_longer_exposes_non_codex_import_commands():
-    runner = CliRunner()
-
-    result = runner.invoke(cli_main.cli, ["account", "--help"])
-
-    assert result.exit_code == 0
-    assert "import-gemini" not in result.output
-    assert "import-opencode" not in result.output
-
-
 def test_version_command_prints_current_version(monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(cli_main, "get_version", lambda: "9.8.7")

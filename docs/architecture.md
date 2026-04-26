@@ -20,7 +20,6 @@ Gateway Layer
 Shared Services
   ├─ InferenceService
   ├─ ChannelService
-  └─ UsageMonitor
 
 Runtime Core
   ├─ Orchestrator
@@ -29,7 +28,6 @@ Runtime Core
 
 Persistence
   ├─ SQLite product state
-  ├─ vault credential files
   ├─ runtime log shards
   └─ trace shards
 ```
@@ -46,11 +44,7 @@ User-bound turns should flow through `InferenceService` so workspace binding, se
 
 ### Provider execution
 
-Provider adapters are intentionally local-CLI based:
-
-- Codex uses the local installed `codex` executable with a managed isolated home
-- Gemini uses the local installed `gemini` CLI with host login state
-- OpenCode uses the local installed `opencode` CLI with host login state
+Provider adapters are intentionally local-CLI based and use the host system's native login state.
 
 ## 3. Persistence Boundaries
 
@@ -58,10 +52,10 @@ Provider adapters are intentionally local-CLI based:
 
 - users
 - API keys
+- workspaces
 - sessions
+- tasks
 - turns
-- accounts
-- usage summaries
 - workspace resets
 - channel links, conversations, link tokens, runtime state
 - audit log
@@ -71,20 +65,9 @@ Provider adapters are intentionally local-CLI based:
 - runtime logs under `logs/runtime/...`
 - traces under `logs/traces/...`
 
-### Vault storage owns
-
-- managed provider credential blobs under the Codara config directory
-
 ## 4. Isolation Model
 
-Codara uses two different runtime-auth models:
-
-- **Managed isolated model**
-  - Codex credentials are stored in the vault and injected into an isolated runtime home
-- **System-local model**
-  - Gemini and OpenCode depend on the host machine's local CLI login
-
-That split is deliberate. Do not collapse them into one generic provider-auth model in docs or code.
+Codara depends on the host machine's local CLI login for all providers (Gemini, OpenCode, Codex).
 
 ## 5. Dashboard Map
 
@@ -94,10 +77,8 @@ The live dashboard routes are:
 - `/playground`
 - `/sessions`
 - `/workspaces`
-- `/accounts`
 - `/users`
 - `/providers`
-- `/usage`
 - `/observability`
 - `/audit`
 

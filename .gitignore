@@ -33,6 +33,11 @@ codara.db
 codara.toml
 .env
 
+# Local deployment config/examples staging
+configs/codara.toml
+configs/data/
+configs/*.db
+
 .egg-info/
 
 workspaces/

@@ -7,8 +7,10 @@ from typing import Any, List, Optional
 
 from codara.adapters.base import ProviderAdapter, CliRuntimeMixin
 from codara.adapters.cli_monitor import communicate_with_stall_detection, terminate_process
+from codara.cli_run_store import CliRunStore
 from codara.config import get_provider_default_model, get_settings
 from codara.core.models import Message, ProviderType, Session, TurnResult
+from codara.telemetry import current_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +26,13 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
 
     async def send_turn(self, session: Session, messages: List[Message], provider_model: str) -> TurnResult:
         opencode_bin = self._resolve_executable("opencode")
+        settings = get_settings()
+        store = CliRunStore() if settings.cli_capture_enabled else None
+        session_key = session.client_session_id or session.session_id
         prompt = self._messages_to_prompt(messages)
         backend_id = session.backend_id
         for allow_resume in (True, False):
+            capture = store.allocate_run(provider=ProviderType.OPENCODE.value, session_id=session_key) if store else None
             command = [
                 opencode_bin,
                 "run",
@@ -44,8 +50,32 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
 
             proc = None
             try:
+                if capture is not None:
+                    context = current_trace_context()
+                    store.write_meta(
+                        capture.meta_path,
+                        {
+                            "run_id": capture.run_id,
+                            "provider": ProviderType.OPENCODE.value,
+                            "session_id": session_key,
+                            "cwd": session.cwd_path,
+                            "command": command,
+                            "provider_model": provider_model,
+                            "attempt": "resume" if allow_resume and backend_id else "fresh",
+                            "status": "running",
+                            "started_at": datetime.now(timezone.utc).isoformat(),
+                            "ended_at": None,
+                            "exit_code": None,
+                            "trace_id": context.trace_id if context else None,
+                            "request_id": context.request_id if context else None,
+                            "error": None,
+                        },
+                    )
+                    store.write_prompt(capture.prompt_path, prompt)
+                # Note: We rely on the local system's CLI login.
                 proc = await asyncio.create_subprocess_exec(
                     *command,
+                    stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=os.environ.copy(),
@@ -55,6 +85,8 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                     proc,
                     stall_timeout_seconds=self.stall_timeout_seconds,
                     process_label="OpenCode CLI",
+                    stdout_tee_path=capture.stdout_path if capture else None,
+                    stderr_tee_path=capture.stderr_path if capture else None,
                 )
                 stderr_output = stderr.decode().strip()
                 if proc.returncode != 0:
@@ -66,20 +98,29 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                         raise RuntimeError(f"OpenCode Rate Limit: {stderr_output}")
                     if self._looks_like_local_auth_failure(lowered):
                         raise RuntimeError(f"OpenCode CLI is not logged in on the local system: {stderr_output}")
+                    if capture is not None:
+                        store.end_run(capture, status="error", exit_code=proc.returncode, error=stderr_output or "unknown OpenCode CLI error")
                     raise RuntimeError(f"OpenCode CLI exec failed: {stderr_output or 'unknown OpenCode CLI error'}")
 
-                resolved_backend_id, context_tokens, output_text = self._parse_exec_output(
+                resolved_backend_id, output_text = self._parse_exec_output(
                     stdout.decode(),
                     current_backend_id=backend_id if allow_resume else "",
                 )
+                if capture is not None:
+                    store.end_run(capture, status="ok", exit_code=proc.returncode, error=None)
                 return TurnResult(
                     output=output_text,
                     backend_id=resolved_backend_id,
                     finish_reason="stop",
-                    context_tokens=context_tokens,
                 )
             except FileNotFoundError as exc:
+                if capture is not None:
+                    store.end_run(capture, status="error", exit_code=None, error="OpenCode CLI is not installed on the local system")
                 raise RuntimeError("OpenCode CLI is not installed on the local system") from exc
+            except Exception as exc:
+                if capture is not None and proc is not None and proc.returncode is None:
+                    store.end_run(capture, status="stalled", exit_code=None, error=str(exc))
+                raise
             finally:
                 if proc is not None and proc.returncode is None:
                     await terminate_process(proc)
@@ -153,22 +194,19 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
     async def resume_session(self, backend_id: str) -> Session:
         now = datetime.now(timezone.utc)
         return Session(
+            session_id="",  # Placeholder for resume
+            workspace_id="", # Placeholder for resume
             client_session_id="",
             backend_id=backend_id,
             provider=ProviderType.OPENCODE,
-            account_id="opencode-system",
+            user_id="",
             cwd_path=os.getcwd(),
-            prefix_hash="",
             created_at=now,
             updated_at=now,
             expires_at=now + timedelta(hours=24),
         )
 
     async def terminate_session(self, backend_id: str) -> None:
-        return None
-
-    async def collect_usage(self, account: Any, credential: Optional[str], settings: Any) -> Optional[dict]:
-        logger.warning("Background usage collection for OpenCode is not yet supported.")
         return None
 
     def _messages_to_prompt(self, messages: List[Message]) -> str:
@@ -179,11 +217,10 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
             parts.append(f"{role.upper()}:\n{content}")
         return "\n\n".join(parts)
 
-    def _parse_exec_output(self, stdout: str, current_backend_id: str) -> tuple[str, Optional[int], str]:
+    def _parse_exec_output(self, stdout: str, current_backend_id: str) -> tuple[str, str]:
         backend_id = current_backend_id
         output_parts: list[str] = []
         final_output = ""
-        context_tokens: Optional[int] = None
         seen_event_types: list[str] = []
 
         for payload in self._iter_json_objects(stdout):
@@ -210,16 +247,7 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
                 if isinstance(text, str) and text.strip():
                     final_output = text.strip()
             elif event_type in {"turn.done", "step_finish"}:
-                usage = payload.get("usage")
-                if not isinstance(usage, dict):
-                    part = payload.get("part")
-                    if isinstance(part, dict):
-                        usage = part.get("tokens")
-                if isinstance(usage, dict):
-                    input_tokens = int(usage.get("input_tokens") or usage.get("inputTokens") or usage.get("input") or 0)
-                    output_tokens = int(usage.get("output_tokens") or usage.get("outputTokens") or usage.get("output") or 0)
-                    if input_tokens or output_tokens:
-                        context_tokens = input_tokens + output_tokens
+                pass
 
             if not final_output:
                 response = self._extract_message_text(payload.get("response"))
@@ -230,7 +258,7 @@ class OpenCodeAdapter(ProviderAdapter, CliRuntimeMixin):
         if not output_text:
             event_summary = ", ".join(seen_event_types[:8]) if seen_event_types else "none"
             raise RuntimeError(f"OpenCode CLI did not return an assistant message (events: {event_summary})")
-        return backend_id, context_tokens, output_text
+        return backend_id, output_text
 
     def _iter_json_objects(self, stdout: str) -> list[dict[str, Any]]:
         raw = stdout.strip()

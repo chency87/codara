@@ -37,20 +37,12 @@ The codebase **substantially aligns** with the design specifications in `overvie
 | GET /management/v1/sessions | ✅ Spec'd | ✅ Implemented |
 | DELETE /management/v1/sessions/:id | ✅ Spec'd | ✅ Implemented |
 | POST /management/v1/sessions/:id/reset | ✅ Spec'd | ✅ Implemented |
-| GET /management/v1/accounts | ✅ Spec'd | ✅ Implemented |
-| POST /management/v1/accounts | ✅ Spec'd | ✅ Implemented |
-| DELETE /management/v1/accounts/:id | ✅ Spec'd | ✅ Implemented |
-| POST /management/v1/accounts/:id/cooldown | ✅ Spec'd | ❌ Missing |
-| POST /management/v1/accounts/:id/recover | ✅ Spec'd | ❌ Missing |
-| GET /management/v1/health/providers | ✅ Spec'd | ❌ Missing |
-| GET /management/v1/metrics | ✅ Spec'd | ❌ Missing |
-| GET /management/v1/usage | ✅ Spec'd | ❌ Missing |
-| GET /management/v1/usage/accounts/:id | ✅ Spec'd | ✅ Implemented |
-| GET /management/v1/usage/sessions/:id | ✅ Spec'd | ✅ Implemented |
+| GET /management/v1/health/providers | ✅ Spec'd | ✅ Implemented |
+| GET /management/v1/metrics | ✅ Spec'd | ✅ Implemented |
 | GET /management/v1/audit | ✅ Spec'd | ✅ Implemented |
 | GET /management/v1/events | ✅ Spec'd | ❌ Removed |
 
-**API Implementation:** 10/16 endpoints = **62.5%**
+**API Implementation:** Updated (2026-04-26). Account and token-usage endpoints were intentionally removed from the product scope.
 
 **Dashboard:** Implemented with polling-based refresh
 
@@ -60,12 +52,10 @@ The codebase **substantially aligns** with the design specifications in `overvie
 
 ### High Priority
 1. **Session reset endpoint** — `POST /management/v1/sessions/:id/reset`
-2. **Account cooldown/recover endpoints** — Manual operator control over account state
-3. **Provider health endpoint** — `/management/v1/health/providers`
+2. **Provider health endpoint** — `/management/v1/health/providers`
 
 ### Medium Priority
-4. **Metrics endpoint** — Prometheus-compatible `/management/v1/metrics`
-5. **Usage endpoints** — Token usage time-series data
+3. **Metrics endpoint** — Prometheus-compatible `/management/v1/metrics`
 
 ### Low Priority
 6. **Dashboard UI** — Requires React/Vite scaffolding per spec
@@ -75,7 +65,7 @@ The codebase **substantially aligns** with the design specifications in `overvie
 ## Positive Observations
 
 1. Clean architecture with clear separation: Gateway → Orchestrator → Adapters
-2. Database schema matches spec exactly (sessions, accounts, audit_log)
+2. Database schema matches the current product scope (users, workspaces, sessions, audit_log)
 3. Management dashboard state is available via polling
 4. ATR module extracts actions from output
 5. Workspace diff generation works (git diff + hash fallback)

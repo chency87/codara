@@ -36,8 +36,8 @@ const extractAssistantOutput = (response: ChatResponsePayload | null) => {
 };
 
 const Playground = () => {
-  const [provider, setProvider] = useState('codex');
-  const [model, setModel] = useState('uag-codex');
+  const [provider, setProvider] = useState('gemini');
+  const [model, setModel] = useState('uag-gemini');
   const [message, setMessage] = useState('');
   const [workspaceId, setWorkspaceId] = useState('default');
   const [sessionLabel, setSessionLabel] = useState('');
@@ -295,10 +295,6 @@ const Playground = () => {
                     <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/20 text-center">
                       <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Bound User</div>
                       <div className="text-xs font-black text-white">{response?.extensions?.bound_user_display_name || 'dashboard admin'}</div>
-                    </div>
-                    <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/20 text-center">
-                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Reported Context Tokens</div>
-                      <div className="text-xs font-black text-white">{response?.extensions?.reported_context_tokens ?? 'n/a'}</div>
                     </div>
                   </div>
                 </>

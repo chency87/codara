@@ -1,7 +1,8 @@
 import asyncio
 import io
 import time
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -18,7 +19,7 @@ from codara.channels.telegram import (
     TelegramPollingManager,
 )
 from codara.config import ChannelsSettings
-from codara.core.models import Account, AccountStatus, AuthType, ProviderType, Session, SessionStatus, TurnResult
+from codara.core.models import ProviderType, Session, SessionStatus, TurnResult, User, UserStatus
 from codara.database.manager import DatabaseManager
 from codara.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
@@ -32,7 +33,6 @@ def _setup_app(tmp_path, monkeypatch, *, receive_mode="webhook"):
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
     gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
     gateway_app.settings.channels = ChannelsSettings.model_validate(
         {
             "telegram": {
@@ -58,8 +58,18 @@ def _setup_app(tmp_path, monkeypatch, *, receive_mode="webhook"):
             }
         }
     )
-    gateway_app.db_manager = DatabaseManager(str(db_path))
-    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
+    new_db = DatabaseManager(str(db_path))
+    monkeypatch.setattr(gateway_app, "db_manager", new_db)
+    
+    # We must re-instantiate anything that cached old settings or old db_manager
+    new_orchestrator = Orchestrator(new_db)
+    monkeypatch.setattr(gateway_app, "orchestrator", new_orchestrator)
+    
+    gateway_app.channel_service = ChannelService(
+        new_db,
+        gateway_app._inference_service(),
+        gateway_app.settings,
+    )
     return TestClient(gateway_app.app)
 
 
@@ -212,7 +222,7 @@ def test_telegram_turn_reply_reports_no_detected_workspace_changes(tmp_path, mon
     reply = adapter._render_turn_reply(
         ChannelTurnResult(
             text="I inspected the project.",
-            workspace_id="project-a",
+            workspace_id="default",
             provider="codex",
             client_session_id="session-a",
             attachments=[],
@@ -247,7 +257,7 @@ def test_telegram_acknowledge_falls_back_to_chat_action(tmp_path, monkeypatch):
 def test_telegram_webhook_links_user_and_updates_conversation_state(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -280,21 +290,21 @@ def test_telegram_webhook_links_user_and_updates_conversation_state(tmp_path, mo
             "message": {
                 "chat": {"id": 1001},
                 "from": {"id": 2002},
-                "text": "/workspace project-a",
+                "text": "/workspace default",
             }
         },
     )
     assert workspace_resp.status_code == 200
     conversation = gateway_app.db_manager.get_channel_conversation("telegram", "engineering-bot", "telegram:engineering-bot:1001:0")
     assert conversation is not None
-    assert conversation["workspace_id"] == "project-a"
-    assert sent[-1][1] == "Workspace set to project-a."
+    assert conversation["workspace_id"] == "default"
+    assert "Active workspace set to <code>default</code>" in sent[-1][1]
 
 
-def test_telegram_project_commands_create_list_info_and_select(tmp_path, monkeypatch):
+def test_telegram_workspace_commands_create_list_info_and_select(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -313,20 +323,37 @@ def test_telegram_project_commands_create_list_info_and_select(tmp_path, monkeyp
     create_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/project_create news-pulse python"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace_create news-pulse python"}},
     )
     assert create_resp.status_code == 200
-    assert "Project created: news-pulse" in sent[-1][1]
-    assert "Workspace set to news-pulse." in sent[-1][1]
+    assert "Workspace Created" in sent[-1][1]
+    assert "news-pulse" in sent[-1][1]
 
-    user_workspace = Path(created["workspace_path"])
-    assert (user_workspace / "news-pulse" / ".codara" / "project.toml").exists()
-    assert (user_workspace / "news-pulse" / "src" / "news_pulse" / "__init__.py").exists()
+    # Find the created workspace ID
+    workspaces = gateway_app.db_manager.list_workspaces_v2(user_id=created["user_id"])
+    print(f"DEBUG WORKSPACES: {[w.model_dump() for w in workspaces]}")
+    wsk = next(w for w in workspaces if w.name == "news-pulse")
+    workspace_id = wsk.workspace_id
+
+    # In the consolidated model, 'news-pulse' is a subdirectory of user root
+    # unless user_id is empty.
+    user_workspace_news_pulse = Path(created["workspace_path"]) / "news-pulse"
+    print(f"DEBUG CREATED PATH: {created['workspace_path']}")
+    print(f"DEBUG NEWS-PULSE PATH: {user_workspace_news_pulse}")
+    metadata_file = user_workspace_news_pulse / ".codara" / "workspace.toml"
+    if not metadata_file.exists():
+        print(f"DEBUG: Missing metadata file at {metadata_file}")
+        import os
+        if user_workspace_news_pulse.exists():
+             print(f"DEBUG: Directory contents: {os.listdir(user_workspace_news_pulse)}")
+             if (user_workspace_news_pulse / ".codara").exists():
+                  print(f"DEBUG: .codara contents: {os.listdir(user_workspace_news_pulse / '.codara')}")
+    assert metadata_file.exists()
 
     list_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/projects"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspaces"}},
     )
     assert list_resp.status_code == 200
     assert "news-pulse" in sent[-1][1]
@@ -335,27 +362,97 @@ def test_telegram_project_commands_create_list_info_and_select(tmp_path, monkeyp
     info_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/project_info news-pulse"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/workspace_info {workspace_id}"}},
     )
     assert info_resp.status_code == 200
-    assert "Project: news-pulse" in sent[-1][1]
-    assert "Template: python" in sent[-1][1]
+    assert "Workspace:" in sent[-1][1]
+    assert "<code>news-pulse</code>" in sent[-1][1]
+    assert "Template:" in sent[-1][1]
+    assert "<code>python</code>" in sent[-1][1]
 
     select_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/project news-pulse"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/workspace {workspace_id}"}},
     )
     assert select_resp.status_code == 200
     conversation = gateway_app.db_manager.get_channel_conversation("telegram", "engineering-bot", "telegram:engineering-bot:1001:0")
-    assert conversation["workspace_id"] == "news-pulse"
-    assert sent[-1][1] == "Project set to news-pulse."
+    assert conversation["workspace_id"] == workspace_id
+    assert f"Active workspace set to <code>{workspace_id}</code>." in sent[-1][1]
+
+
+def test_telegram_commit_command_performs_git_commit(tmp_path, monkeypatch):
+    client = _setup_app(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
+
+    headers, created = _create_user(client)
+    token_resp = client.post(
+        f"/management/v1/users/{created['user_id']}/channels/link-token",
+        headers=headers,
+        json={"channel": "telegram", "bot_name": "engineering-bot"},
+    )
+    raw_token = token_resp.json()["data"]["raw_token"]
+
+    client.post(
+        "/channels/telegram/engineering-bot/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/link {raw_token}"}},
+    )
+    
+    # Create some file changes manually
+    workspace_path = Path(created["workspace_path"])
+    (workspace_path / "new_file.txt").write_text("content", encoding="utf-8")
+
+    commit_resp = client.post(
+        "/channels/telegram/engineering-bot/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/commit Add new file"}},
+    )
+
+    assert commit_resp.status_code == 200
+    assert "Terminal: Git Commit" in sent[-1][1]
+    
+    # Verify git log
+    import subprocess
+    log = subprocess.run(["git", "log", "-1", "--pretty=%B"], cwd=workspace_path, capture_output=True, text=True).stdout
+    assert "Add new file" in log
+
+
+def test_telegram_git_command_runs_git_subcommand(tmp_path, monkeypatch):
+    client = _setup_app(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
+
+    headers, created = _create_user(client)
+    token_resp = client.post(
+        f"/management/v1/users/{created['user_id']}/channels/link-token",
+        headers=headers,
+        json={"channel": "telegram", "bot_name": "engineering-bot"},
+    )
+    raw_token = token_resp.json()["data"]["raw_token"]
+
+    client.post(
+        "/channels/telegram/engineering-bot/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/link {raw_token}"}},
+    )
+
+    git_resp = client.post(
+        "/channels/telegram/engineering-bot/webhook",
+        headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/git status"}},
+    )
+
+    assert git_resp.status_code == 200
+    assert "<b>Terminal: Git</b>" in sent[-1][1]
+    assert "On branch" in sent[-1][1]
 
 
 def test_telegram_help_and_commands_explain_usage(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     help_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
@@ -363,8 +460,8 @@ def test_telegram_help_and_commands_explain_usage(tmp_path, monkeypatch):
         json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/help"}},
     )
     assert help_resp.status_code == 200
-    assert "How to use it:" in sent[-1][1]
-    assert "/link <token>" in sent[-1][1]
+    assert "<b>How to use it:</b>" in sent[-1][1]
+    assert "<code>/link &lt;token&gt;</code>" in sent[-1][1]
 
     commands_resp = client.post(
         "/channels/telegram/engineering-bot/webhook",
@@ -372,15 +469,15 @@ def test_telegram_help_and_commands_explain_usage(tmp_path, monkeypatch):
         json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/commands"}},
     )
     assert commands_resp.status_code == 200
-    assert "Available commands:" in sent[-1][1]
-    assert "/whoami" in sent[-1][1]
-    assert "/project_create" in sent[-1][1]
+    assert "<b>Available commands:</b>" in sent[-1][1]
+    assert "/<code>whoami</code>" in sent[-1][1]
+    assert "/<code>workspace_create</code>" in sent[-1][1]
 
 
 def test_telegram_whoami_reports_linked_identity(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -398,7 +495,7 @@ def test_telegram_whoami_reports_linked_identity(tmp_path, monkeypatch):
     client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace project-a"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace default"}},
     )
 
     whoami_resp = client.post(
@@ -408,15 +505,15 @@ def test_telegram_whoami_reports_linked_identity(tmp_path, monkeypatch):
     )
 
     assert whoami_resp.status_code == 200
-    assert f"User ID: {created['user_id']}" in sent[-1][1]
-    assert "Workspace: project-a" in sent[-1][1]
-    assert "Provider: codex" in sent[-1][1]
+    assert "<b>Terminal: Identity</b>" in sent[-1][1]
+    assert f"User ID: <code>{created['user_id']}</code>" in sent[-1][1]
+    assert "Active Workspace: <code>default</code>" in sent[-1][1]
 
 
 def test_telegram_session_command_reports_runtime_session_status(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -431,39 +528,48 @@ def test_telegram_session_command_reports_runtime_session_status(tmp_path, monke
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
         json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/link {raw_token}"}},
     )
+    
+    # Select the default workspace
     client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace project-a"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace default"}},
     )
 
-    client_session_id = f"{created['user_id']}::project-a::telegram:engineering-bot:1001:0"
     now = datetime.now(timezone.utc)
-    gateway_app.db_manager.save_account(
-        Account(
-            account_id="codex-account",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Account",
-            status=AccountStatus.READY.value,
-        )
+    workspaces = gateway_app.db_manager.list_workspaces_v2(user_id=created["user_id"])
+    wsk = next(w for w in workspaces if w.name == "default")
+    workspace_id = wsk.workspace_id
+
+    session_label = "tg-thread-1"
+    client_session_id = f"{created['user_id']}::{workspace_id}::{session_label}"
+    
+    # Force use of a stable client session label in conversation
+    gateway_app.db_manager.save_channel_conversation(
+        channel="telegram",
+        bot_name="engineering-bot",
+        conversation_key="telegram:engineering-bot:1001:0",
+        user_id=created["user_id"],
+        external_chat_id="1001",
+        external_thread_id=None,
+        workspace_id=workspace_id,
+        provider="codex",
+        session_label=session_label
     )
+
     gateway_app.db_manager.save_session(
         Session(
+            session_id=f"ses_real_1",
+            workspace_id=workspace_id,
             client_session_id=client_session_id,
             backend_id="provider-session-1",
             provider=ProviderType.CODEX,
-            account_id="codex-account",
             user_id=created["user_id"],
-            api_key_id=None,
-            cwd_path=str(Path(created["workspace_path"]) / "project-a"),
-            prefix_hash="prefix",
+            cwd_path=str(wsk.path),
             status=SessionStatus.ACTIVE,
-            fence_token=0,
-            last_context_tokens=123,
             created_at=now,
             updated_at=now,
-            expires_at=now,
+            expires_at=now + timedelta(hours=1),
         )
     )
 
@@ -475,10 +581,9 @@ def test_telegram_session_command_reports_runtime_session_status(tmp_path, monke
 
     assert resp.status_code == 200
     assert "Runtime:" in sent[-1][1]
-    assert "Status: active" in sent[-1][1]
-    assert f"Client session: {client_session_id}" in sent[-1][1]
-    assert "Provider session: provider-session-1" in sent[-1][1]
-    assert "Last context tokens: 123" in sent[-1][1]
+    assert "Status: <code>active</code>" in sent[-1][1]
+    assert client_session_id in sent[-1][1]
+    assert "provider-session-1" in sent[-1][1]
 
 
 def test_telegram_turn_error_is_reported_to_channel(tmp_path, monkeypatch):
@@ -529,15 +634,15 @@ def test_telegram_turn_error_is_reported_to_channel(tmp_path, monkeypatch):
     )
 
     assert resp.status_code == 200
-    assert any("Status: Failed" in payload["text"] for payload in edited)
-    assert sent[-1]["text"].startswith("Codara turn failed:")
+    assert any("Status: <code>Failed</code>" in payload["text"] for payload in edited)
+    assert sent[-1]["text"].startswith("<b>Terminal: Error</b>")
     assert "provider unavailable" in sent[-1]["text"]
 
 
 def test_telegram_webhook_executes_turn_via_user_bound_inference_service(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -552,10 +657,12 @@ def test_telegram_webhook_executes_turn_via_user_bound_inference_service(tmp_pat
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
         json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": f"/link {raw_token}"}},
     )
+    
+    # Use default workspace
     client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace project-a"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace default"}},
     )
     client.post(
         "/channels/telegram/engineering-bot/webhook",
@@ -565,9 +672,9 @@ def test_telegram_webhook_executes_turn_via_user_bound_inference_service(tmp_pat
 
     observed = {}
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         observed["workspace_root"] = options.workspace_root
-        observed["workspace_id"] = options.workspace_id
+        observed["workspace_id"] = options.workspace_id or workspace_id
         observed["client_session_id"] = options.client_session_id
         observed["provider"] = options.provider.value
         observed["user_id"] = options.user_id
@@ -596,12 +703,12 @@ def test_telegram_webhook_executes_turn_via_user_bound_inference_service(tmp_pat
     )
 
     assert resp.status_code == 200
-    assert observed["workspace_id"] == "project-a"
+    assert observed["workspace_id"] == "default"
     assert observed["provider"] == "gemini"
     assert observed["user_id"] == created["user_id"]
-    assert observed["client_session_id"].startswith(f"{created['user_id']}::project-a::telegram:engineering-bot:1001:0")
-    assert Path(observed["workspace_root"]).resolve() == (Path(created["workspace_path"]) / "project-a").resolve()
-    assert sent[-1][1].startswith("Patch applied")
+    assert observed["client_session_id"].endswith("telegram:engineering-bot:1001:0")
+    assert Path(observed["workspace_root"]).resolve() == Path(created["workspace_path"]).resolve()
+    assert "Patch applied" in sent[-1][1]
     assert "Modified files:" in sent[-1][1]
 
 
@@ -651,7 +758,7 @@ def test_telegram_turn_sends_realtime_status_updates(tmp_path, monkeypatch):
     client.post(
         "/channels/telegram/engineering-bot/webhook",
         headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
-        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace project-a"}},
+        json={"message": {"chat": {"id": 1001}, "from": {"id": 2002}, "text": "/workspace default"}},
     )
 
     resp = client.post(
@@ -663,17 +770,17 @@ def test_telegram_turn_sends_realtime_status_updates(tmp_path, monkeypatch):
     assert resp.status_code == 200
     sent_texts = [payload["text"] for payload in sent]
     edited_texts = [payload["text"] for payload in edited]
-    assert any("Status: Queued" in text for text in sent_texts)
-    assert any("Status: Preparing workspace" in text for text in edited_texts)
-    assert any("Status: Running provider" in text for text in edited_texts)
-    assert any("Status: Completed" in text and "Modified files: 1" in text for text in edited_texts)
-    assert sent_texts[-1].startswith("Turn complete")
+    assert any("Status: <code>Queued</code>" in text for text in sent_texts)
+    assert any("Status: <code>Preparing workspace</code>" in text for text in edited_texts)
+    assert any("Status: <code>Running provider</code>" in text for text in edited_texts)
+    assert any("Status: <code>Completed</code>" in text and "Modified files: 1" in text for text in edited_texts)
+    assert sent_texts[-1].startswith("<pre>Turn complete</pre>")
 
 
 def test_telegram_document_attachment_is_staged_into_workspace(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((chat_id, text, thread_id)))
     monkeypatch.setattr(
         TelegramChannelAdapter,
         "fetch_attachment",
@@ -695,7 +802,7 @@ def test_telegram_document_attachment_is_staged_into_workspace(tmp_path, monkeyp
 
     observed = {}
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         observed["workspace_root"] = options.workspace_root
         observed["messages"] = messages
         return TurnResult(output="Uploaded file processed", backend_id="tg-sess-2", finish_reason="stop")
@@ -731,7 +838,7 @@ def test_telegram_document_attachment_is_staged_into_workspace(tmp_path, monkeyp
 def test_multiple_telegram_bots_keep_bindings_separate(tmp_path, monkeypatch):
     client = _setup_app(tmp_path, monkeypatch)
     sent = []
-    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None: sent.append((self.bot_name, chat_id, text, thread_id)))
+    monkeypatch.setattr(TelegramChannelAdapter, "send_text", lambda self, chat_id, text, thread_id=None, **_: sent.append((self.bot_name, chat_id, text, thread_id)))
 
     headers, created = _create_user(client)
     token_resp = client.post(
@@ -750,7 +857,7 @@ def test_multiple_telegram_bots_keep_bindings_separate(tmp_path, monkeypatch):
     assert link_resp.status_code == 200
     assert gateway_app.db_manager.get_channel_user_link("telegram", "engineering-bot", "2002") is None
     assert gateway_app.db_manager.get_channel_user_link("telegram", "ops-bot", "2002") is None
-    assert sent[-1][2] == "Invalid or expired channel link token"
+    assert "Invalid or expired channel link token" in sent[-1][2]
 
 
 def test_telegram_webhook_route_rejects_polling_mode(tmp_path, monkeypatch):

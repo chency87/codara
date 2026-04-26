@@ -9,8 +9,9 @@ from codara.config import Settings, get_provider_default_model
 from codara.core.models import Message, ProviderType, UagOptions
 from codara.database.manager import DatabaseManager
 from codara.services.inference import AttachmentInput, InferenceService
+from codara.workspace.engine import WorkspaceEngine
 from codara.workspace.manager import WorkspaceManager
-from codara.workspace.project import PROJECT_TEMPLATES, ProjectService
+from codara.workspace.service import WORKSPACE_TEMPLATES, WorkspaceService
 
 
 @dataclass
@@ -99,7 +100,25 @@ class ChannelService:
         user = self.db.get_user(conversation["user_id"])
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        _root, normalized = self.inference.resolve_user_workspace(user.workspace_path, workspace_id)
+        
+        # Verify workspace exists for user
+        ws_service = self._workspace_service_for_user(user)
+        
+        # Try finding by name first
+        workspaces = ws_service.list_workspaces_v2()
+        ws = next((w for w in workspaces if w.name == workspace_id), None)
+        
+        # If not found by name, try finding by ID
+        if not ws:
+            ws = ws_service.get_workspace_v2(workspace_id)
+            
+        if not ws:
+            raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
+        
+        # We store the workspace_id in the conversation, 
+        # but if it was 'default' by name, we keep using 'default' for better readability and tests.
+        final_id = "default" if ws.name == "default" else ws.workspace_id
+
         return self.db.save_channel_conversation(
             channel=conversation["channel"],
             bot_name=conversation["bot_name"],
@@ -107,21 +126,21 @@ class ChannelService:
             user_id=conversation["user_id"],
             external_chat_id=conversation.get("external_chat_id"),
             external_thread_id=conversation.get("external_thread_id"),
-            workspace_id=normalized,
+            workspace_id=final_id,
             provider=conversation["provider"],
             session_label=conversation["session_label"],
         )
 
-    def _project_service_for_user(self, user) -> ProjectService:
-        return ProjectService(
+    def _workspace_service_for_user(self, user) -> WorkspaceService:
+        return WorkspaceService(
             WorkspaceManager(
                 self.db,
-                workspaces_root=user.workspace_path,
-                isolated_envs_root=self.settings.isolated_envs_root,
-            )
+                workspaces_root=self.settings.workspaces_root,
+            ),
+            self.db
         )
 
-    def create_user_project(
+    def create_user_workspace(
         self,
         *,
         user_id: str,
@@ -132,27 +151,50 @@ class ChannelService:
         user = self.db.get_user(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        if template not in PROJECT_TEMPLATES:
-            raise HTTPException(status_code=400, detail=f"Unsupported project template: {template}")
-        result = self._project_service_for_user(user).create_project(
+        if template not in WORKSPACE_TEMPLATES:
+            raise HTTPException(status_code=400, detail=f"Unsupported workspace template: {template}")
+        result = self._workspace_service_for_user(user).create_workspace(
             name,
+            user_id,
             template=template,
             default_provider=default_provider,
-            created_by=f"channel:{user_id}",
         )
-        return result.to_dict()
+        return result.model_dump()
 
-    def list_user_projects(self, user_id: str) -> list[dict]:
+    def list_user_workspaces(self, user_id: str) -> list[dict]:
         user = self.db.get_user(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return self._project_service_for_user(user).list_projects()
+        return [record.model_dump() for record in self._workspace_service_for_user(user).list_workspaces_v2()]
 
-    def get_user_project(self, user_id: str, name: str) -> Optional[dict]:
+    def get_user_workspace(self, user_id: str, workspace_id: str) -> Optional[dict]:
         user = self.db.get_user(user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return self._project_service_for_user(user).get_project(name)
+        record = self._workspace_service_for_user(user).get_workspace_v2(workspace_id)
+        return record.model_dump() if record else None
+
+    def commit_workspace_changes(self, user_id: str, workspace_id: str, message: str) -> str:
+        user = self.db.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        workspace = self._workspace_service_for_user(user).get_workspace_v2(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        
+        engine = WorkspaceEngine(workspace.path)
+        return engine.commit(message, author_name=user.display_name, author_email=user.email)
+
+    def run_workspace_git_command(self, user_id: str, workspace_id: str, args: List[str]) -> str:
+        user = self.db.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        workspace = self._workspace_service_for_user(user).get_workspace_v2(workspace_id)
+        if not workspace:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        
+        engine = WorkspaceEngine(workspace.path)
+        return engine.run_git_command(args)
 
     def update_conversation_provider(self, conversation: dict, provider: str) -> dict:
         provider_enum = ProviderType(provider)
@@ -195,9 +237,7 @@ class ChannelService:
             "exists": session is not None,
             "status": session.status.value if session else "not_started",
             "backend_id": session.backend_id if session else None,
-            "account_id": session.account_id if session else None,
-            "cwd_path": session.cwd_path if session else None,
-            "last_context_tokens": session.last_context_tokens if session else None,
+            "workspace_id": session.workspace_id if session else None,
             "updated_at": session.updated_at.isoformat() if session else None,
         }
 

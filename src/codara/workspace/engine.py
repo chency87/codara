@@ -54,6 +54,58 @@ class WorkspaceEngine:
                 env=env,
             )
 
+    def commit(self, message: str, author_name: str = "Codara", author_email: str = "codara@local") -> str:
+        if not self.is_git_repo():
+            raise RuntimeError("Workspace is not a git repository")
+        
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=self.workspace_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        
+        env = os.environ.copy()
+        env.setdefault("GIT_AUTHOR_NAME", author_name)
+        env.setdefault("GIT_AUTHOR_EMAIL", author_email)
+        env.setdefault("GIT_COMMITTER_NAME", env["GIT_AUTHOR_NAME"])
+        env.setdefault("GIT_COMMITTER_EMAIL", env["GIT_AUTHOR_EMAIL"])
+        
+        result = subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=self.workspace_root,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        return result.stdout.strip()
+
+    def run_git_command(self, args: List[str]) -> str:
+        if not self.is_git_repo():
+            raise RuntimeError("Workspace is not a git repository")
+        
+        # Security: Prevent escaping the workspace or running non-git commands
+        # Although subprocess.run with a list is safer, we should still be careful.
+        env = os.environ.copy()
+        env.setdefault("GIT_AUTHOR_NAME", "Codara")
+        env.setdefault("GIT_AUTHOR_EMAIL", "codara@local")
+        env.setdefault("GIT_COMMITTER_NAME", env["GIT_AUTHOR_NAME"])
+        env.setdefault("GIT_COMMITTER_EMAIL", env["GIT_AUTHOR_EMAIL"])
+
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=self.workspace_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            return f"Error: {result.stderr.strip() or result.stdout.strip() or 'Unknown git error'}"
+        return result.stdout.strip() or "Success (no output)"
+
     def _has_git_head(self) -> bool:
         if not self.is_git_repo():
             return False

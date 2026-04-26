@@ -24,7 +24,7 @@ def test_openapi_groups_routes_by_module(tmp_path, monkeypatch):
     tag_names = {tag["name"] for tag in schema["tags"]}
     assert "Inference" in tag_names
     assert "User Self-Service" in tag_names
-    assert "Management Accounts" in tag_names
+    
     assert "Management Sessions" in tag_names
 
     assert schema["paths"]["/v1/chat/completions"]["post"]["tags"] == ["Inference"]
@@ -32,9 +32,28 @@ def test_openapi_groups_routes_by_module(tmp_path, monkeypatch):
     assert schema["paths"]["/v1/user/me"]["get"]["tags"] == ["User Self-Service"]
     assert schema["paths"]["/v1/user/me"]["get"]["security"] == [{"User API Key": []}]
     assert schema["paths"]["/v1/user/keys"]["get"]["security"] == [{"User API Key": []}]
-    assert schema["paths"]["/v1/user/usage"]["get"]["security"] == [{"User API Key": []}]
     assert schema["paths"]["/v1/user/sessions"]["get"]["security"] == [{"User API Key": []}]
-    assert schema["paths"]["/management/v1/accounts"]["get"]["tags"] == ["Management Accounts"]
+def test_chat_completions_requires_authorization(tmp_path, monkeypatch):
+    db_path = tmp_path / "codara.db"
+
+    monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
+    gateway_app.settings.secret_key = "unit-test-secret"
+    gateway_app.clear_auth_caches()
+    gateway_app.db_manager = DatabaseManager(str(db_path))
+    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
+
+    client = TestClient(gateway_app.app)
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-5-codex",
+            "messages": [{"role": "user", "content": "ping"}],
+            "provider": "codex",
+        },
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Authentication token missing"
 
 
 def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, monkeypatch):
@@ -47,7 +66,6 @@ def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, mon
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
     gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
@@ -62,20 +80,13 @@ def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, mon
     client = TestClient(gateway_app.app)
     resp = client.post(
         "/v1/chat/completions",
+        headers={"Authorization": "Bearer unit-test-secret"},
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-<<<<<<< HEAD
-            "uag_options": {
-                "provider": "gemini",
-                "workspace_root": str(workspace),
-                "client_session_id": "thread-1",
-            },
-=======
             "provider": "gemini",
             "workspace_root": str(workspace),
             "client_session_id": "thread-1",
->>>>>>> main
         },
     )
 
@@ -93,56 +104,18 @@ def test_chat_completions_rejects_direct_workspace_outside_safe_zone(tmp_path, m
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
     gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
     client = TestClient(gateway_app.app)
     resp = client.post(
         "/v1/chat/completions",
+        headers={"Authorization": "Bearer unit-test-secret"},
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-<<<<<<< HEAD
-            "uag_options": {"provider": "gemini", "workspace_root": str(outside)},
-=======
             "provider": "gemini",
             "workspace_root": str(outside),
->>>>>>> main
-        },
-    )
-
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "workspace_access_denied"
-
-
-def test_chat_completions_rejects_isolated_envs_workspace(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
-    workspaces_root = tmp_path / "workspaces"
-    isolated_root = workspaces_root / "isolated_envs"
-    isolated_workspace = isolated_root / "gemini" / "acct-1"
-    isolated_workspace.mkdir(parents=True)
-
-    monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
-    gateway_app.settings.secret_key = "unit-test-secret"
-    gateway_app.clear_auth_caches()
-    gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(isolated_root)
-    gateway_app.db_manager = DatabaseManager(str(db_path))
-    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
-
-    client = TestClient(gateway_app.app)
-    resp = client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gemini-2.5-pro",
-            "messages": [{"role": "user", "content": "ping"}],
-<<<<<<< HEAD
-            "uag_options": {"provider": "gemini", "workspace_root": str(isolated_workspace)},
-=======
-            "provider": "gemini",
-            "workspace_root": str(isolated_workspace),
->>>>>>> main
         },
     )
 
@@ -163,7 +136,6 @@ def test_chat_completions_rejects_operator_workspace_traversal_outside_safe_zone
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
     gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
@@ -174,19 +146,13 @@ def test_chat_completions_rejects_operator_workspace_traversal_outside_safe_zone
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
-<<<<<<< HEAD
-            "uag_options": {"provider": "gemini", "workspace_root": str(traversal)},
-=======
             "provider": "gemini",
             "workspace_root": str(traversal),
->>>>>>> main
         },
     )
 
     assert resp.status_code == 403
     assert resp.json()["detail"] == "workspace_access_denied"
-<<<<<<< HEAD
-=======
 
 
 def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, monkeypatch):
@@ -199,7 +165,6 @@ def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, mon
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
     gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.settings.isolated_envs_root = str(workspaces_root / "isolated_envs")
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
@@ -216,6 +181,7 @@ def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, mon
     client = TestClient(gateway_app.app)
     resp = client.post(
         "/v1/chat/completions",
+        headers={"Authorization": "Bearer unit-test-secret"},
         json={
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "ping"}],
@@ -233,4 +199,3 @@ def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, mon
         "provider": "gemini",
         "client_session_id": "thread-legacy",
     }
->>>>>>> main

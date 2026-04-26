@@ -17,7 +17,6 @@
 - Run the dashboard dev server: `cd ui && npm run dev`
 - Build the dashboard: `cd ui && npm run build`
 - Lint the dashboard: `cd ui && npm run lint`
-- Copilot cloud-agent sessions preinstall Playwright MCP and Chromium through `.github/workflows/copilot-setup-steps.yml`
 
 ## High-level architecture
 

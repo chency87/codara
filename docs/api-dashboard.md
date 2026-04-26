@@ -50,7 +50,6 @@ Routes:
 - `POST /management/v1/users/{user_id}/keys/rotate`
 - `POST /management/v1/users/{user_id}/channels/link-token`
 - `POST /management/v1/users/{user_id}/workspace/reset`
-- `GET /management/v1/users/{user_id}/usage`
 
 Dashboard behavior:
 
@@ -80,41 +79,7 @@ Routes:
 - `DELETE /management/v1/sessions/{session_id}`
 - `POST /management/v1/sessions/{session_id}/reset`
 
-### 3.4 Accounts
-
-Routes:
-
-- `GET /management/v1/accounts`
-- `GET /management/v1/accounts/{account_id}`
-- `POST /management/v1/accounts`
-- `POST /management/v1/accounts/upload`
-- `POST /management/v1/accounts/{account_id}/select`
-- `POST /management/v1/accounts/{account_id}/cooldown`
-- `POST /management/v1/accounts/{account_id}/recover`
-- `DELETE /management/v1/accounts/{account_id}`
-
-Current provider policy:
-
-- Codex is the only managed account provider.
-- Gemini and OpenCode are local-only runtimes and are not imported into the managed account pool.
-
-Current Codex isolation policy:
-
-- selecting a Codex account marks it CLI-primary in Codara
-- managed Codex credentials stay in the vault and isolated runtime path
-- selecting a managed Codex account does **not** overwrite the host `~/.codex/auth.json`
-
-### 3.5 Usage
-
-Routes:
-
-- `GET /management/v1/usage`
-- `GET /management/v1/usage/timeseries`
-- `POST /management/v1/usage/refresh`
-- `GET /management/v1/usage/accounts/{account_id}`
-- `GET /management/v1/usage/sessions/{session_id}`
-
-### 3.6 Observability
+### 3.4 Observability
 
 Routes:
 
@@ -134,7 +99,7 @@ Observability storage model:
 - runtime logs are file-backed JSONL shards
 - the API merges or filters them at query time
 
-### 3.7 Audit and Playground
+### 3.5 Audit and Playground
 
 Routes:
 
@@ -153,10 +118,8 @@ The current dashboard routes and responsibilities are:
 | `/playground` | Agent Playground | Operator testing through the shared user-bound flow |
 | `/sessions` | Active Sessions | Inspect, copy, reset, or delete sessions |
 | `/workspaces` | Workspaces | Inspect managed workspaces and reset/delete them |
-| `/accounts` | Account Pool | Register Codex accounts, select CLI-primary, cooldown/recover |
 | `/users` | Users | Provision users, rotate keys, issue Telegram link tokens, reset workspace sessions |
 | `/providers` | Providers | Runtime provider readiness and model inventory |
-| `/usage` | Usage Metrics | Aggregate and time-series usage views |
 | `/observability` | Observability | Unified trace + runtime-log workflow |
 | `/audit` | Audit Logs | Search and inspect management mutations |
 

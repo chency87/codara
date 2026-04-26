@@ -24,7 +24,6 @@ services:
       UAG_CONFIG_DIR: /config
       UAG_DATABASE_PATH: /data/codara.db
       UAG_WORKSPACES_ROOT: /workspaces
-      UAG_ISOLATED_ENVS_ROOT: /workspaces/isolated_envs
       UAG_LOGS_ROOT: /logs
 
       API_TOKEN: ${API_TOKEN:-change-me-before-production}

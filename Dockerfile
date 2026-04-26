@@ -69,7 +69,6 @@ ENV VIRTUAL_ENV=/app/.venv \
     UAG_CONFIG_DIR=/config \
     UAG_DATABASE_PATH=/data/codara.db \
     UAG_WORKSPACES_ROOT=/workspaces \
-    UAG_ISOLATED_ENVS_ROOT=/workspaces/isolated_envs \
     UAG_LOGS_ROOT=/logs
 
 RUN --mount=type=cache,target=/var/cache/apt \
@@ -108,7 +107,6 @@ RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
         /config \
         /logs \
         /workspaces \
-        /workspaces/isolated_envs \
         "/home/${USERNAME}/.local/bin" \
         "/home/${USERNAME}/.local/share" \
         "/home/${USERNAME}/.history" \

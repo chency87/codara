@@ -59,13 +59,8 @@ if not options.manual_mode and not is_git_repo:
 ```
 **Status:** Not a bug. This is intentional behavior - git workspaces can use `git diff HEAD` without pre-capturing file hashes, so snapshot is still taken for git repos regardless of manual_mode.
 
-#### BUG-5: Token Count Set to 0 in Turn Recording
-**Location:** `orchestrator/engine.py:208-209`
-```python
-input_tokens=0,  # In production, count from compressed_messages
-output_tokens=tokens_delta,
-```
-**Issue:** Input tokens are always recorded as 0, breaking usage analytics.
+#### BUG-5: Token usage tracking removed
+**Status:** Removed (2026-04-26). Codara no longer records or reports LLM token usage, so this class of analytics bugs no longer applies.
 
 ### 2.2 Medium Bugs
 
@@ -153,7 +148,7 @@ conn.execute("PRAGMA journal_mode=WAL")
 
 #### PERF-4: No Database Query Caching
 **Location:** Throughout `database/manager.py`
-**Impact:** Every request hits the database. Frequently-read data like user sessions, account status should be cached.
+**Impact:** Every request hits the database. Frequently-read data like user sessions and workspace state should be cached.
 
 #### PERF-5: File Hash Calculation on Every Diff
 **Location:** `workspace/engine.py:91`
@@ -165,18 +160,12 @@ def _generate_hash_diff(self) -> Tuple[List[str], Optional[str]]:
 
 ### 3.2 Medium-Impact Performance Problems
 
-#### PERF-6: Synchronous HTTP Calls in Adapter
-**Location:** `codex.py:115-125`
-```python
-async with httpx.AsyncClient(timeout=30.0) as client:
-    weekly_resp = await client.get(...)
-    hourly_resp = await client.get(...)
-```
-**Impact:** These usage collection calls happen during account selection but are not awaited asynchronously in the main flow (they block). However, they only run periodically, not per-request.
+#### PERF-6: Adapter usage collection (removed)
+**Status:** Removed (2026-04-26). Codara no longer manages provider accounts or syncs token usage/billing metrics.
 
 #### PERF-7: Large Response Serialization
 **Location:** `gateway/app.py:516-542`
-**Impact:** `_serialize_user()` performs multiple database queries (lines 518-522) for usage aggregation. Should batch these queries.
+**Impact:** `_serialize_user()` performs multiple database queries for summary aggregation. Should batch these queries.
 
 ---
 
@@ -198,37 +187,9 @@ async with httpx.AsyncClient(timeout=30.0) as client:
 
 ---
 
-## 5. Stale/Useless Test Functions
+## 5. Token Usage & Account Tests (removed)
 
-The following test functions are stale, invalid, or provide no value:
-
-### 5.1 Completely Empty Tests (just `pass`)
-
-| File | Test Function | Reason |
-|------|---------------|--------|
-| `test_usage_monitor.py:131-135` | `test_usage_monitor_prefers_oauth_session_token_before_billing_key` | Test is empty, marked invalid in comments - "get_all_accounts is hard-filtered to codex only" |
-| `test_usage_monitor.py:139-142` | `test_usage_monitor_uses_oauth_session_token_when_no_billing_key` | Test is empty, marked invalid in comments |
-| `test_gemini_usage_e2e.py:14-17` | `test_gemini_usage_uses_cli_stats_session_flow` | Test is empty, marked invalid - "we no longer manage Gemini accounts" |
-| `test_gemini_usage_e2e.py:34-35` | `test_gemini_isolation_filesystem_structure` | Test is empty, marked invalid - "Gemini adapter no longer uses isolation" |
-
-### 5.2 Tests That Don't Assert Anything Meaningful
-
-| File | Test Function | Issue |
-|------|---------------|-------|
-| `test_gemini_usage_e2e.py:39-67` | `test_gemini_usage_returns_none_when_cli_stats_unavailable` | Tests that a non-existent provider returns null usage. This test doesn't actually verify any useful behavior since it relies on a non-existent code path (Gemini accounts aren't managed). |
-
-### 5.3 Tests With Broken Mocking Patterns
-
-| File | Test Function | Issue |
-|------|---------------|-------|
-| `test_adapters.py:90-100` | `test_gemini_adapter_collect_usage_uses_system_cli_stats` | Calls `adapter.collect_usage()` which returns `None` for Gemini. The test asserts `usage is None` but the adapter logic has changed significantly and doesn't test meaningful behavior. |
-| `test_usage_monitor.py:82-128` | `test_usage_monitor_uses_configured_codex_billing_key_for_oauth_accounts` | Uses `FakeClient` that doesn't properly mock httpx - may not work with current adapter code structure |
-| `test_usage_monitor.py:131-191` | Multiple tests using FakeClient | The `FakeClient` doesn't properly implement async context manager for current httpx usage patterns |
-
-### 5.4 Summary
-
-- The empty Gemini usage test file and the empty usage-monitor placeholders were removed on 2026-04-14.
-- Remaining test concerns should be evaluated case by case; passing tests with active code coverage were kept.
+Token usage monitoring and managed provider-account logic were removed on 2026-04-26. Tests covering those codepaths were deleted accordingly.
 
 ---
 
@@ -305,25 +266,8 @@ Instead of spawning new processes, maintain session continuity:
 
 **Issue:** Current implementation may spawn new processes even when resuming because the session state might not be properly maintained.
 
-#### Approach 3: Reduce Environment Setup Overhead
-
-Current `codex.py:20` runs `setup_isolated_env()` for EVERY request:
-```python
-temp_dir, env = self.setup_isolated_env("codex", session.account_id)
-```
-
-**Optimization:**
-- Cache the isolated environment for the same account_id
-- Only recreate if credential changes
-
-```python
-_env_cache: dict[str, tuple[str, dict]] = {}
-
-def _get_cached_env(self, account_id: str) -> tuple[str, dict]:
-    if account_id not in self._env_cache:
-        self._env_cache[account_id] = self.setup_isolated_env("codex", account_id)
-    return self._env_cache[account_id]
-```
+#### Approach 3: Reduce Environment Setup Overhead (removed)
+Codara no longer uses managed provider accounts or account-scoped isolated `HOME` directories; runtimes rely on local CLI authentication.
 
 #### Approach 4: Lazy CLI Detection
 
@@ -348,7 +292,7 @@ Start the CLI process in background while handling auth/workspace:
 ```python
 async def send_turn(self, session, messages, provider_model):
     # Start CLI warmup in background (non-blocking)
-    warmup_task = asyncio.create_task(self._ensure_process_warm(session.account_id))
+    warmup_task = asyncio.create_task(self._ensure_process_warm(session.session_id))
     
     # Do other preparation in parallel
     prompt = self._messages_to_prompt(messages)
@@ -399,7 +343,7 @@ class ProcessPool:
 
 # In adapter:
 async def send_turn(self, session, messages, provider_model):
-    pool_key = f"{session.account_id}:{session.cwd_path}"
+    pool_key = f"{session.session_id}:{session.cwd_path}"
     
     # Try to get warm process
     proc = await self._process_pool.acquire(

@@ -4,14 +4,17 @@ import hashlib
 import hmac
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, APIRouter, Depends, Query, Request, Security, status, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 import json
 import os
 import re
+from asyncio import Queue
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
-from typing import List, Optional, Any
+from typing import List, Optional, Any, AsyncIterator
 from pydantic import BaseModel, ConfigDict, Field, AliasChoices, ValidationError, model_validator
 from uuid import uuid4
 
@@ -19,27 +22,26 @@ from codara.core.models import (
     Message,
     UagOptions,
     TurnResult,
-    Account,
-    AuthType,
     Session,
     SessionStatus,
     UserStatus,
     ProviderType,
+    Workspace,
+    Task,
 )
 from codara.config import get_config_path, get_settings, resolve_provider_model, get_telegram_bot_config
 from codara.orchestrator.engine import Orchestrator
 from codara.database.manager import DatabaseManager
 from codara.core.security import generate_api_key, hash_api_key
-from codara.accounts.monitor import UsageMonitor
-from codara.accounts.pool import AccountPool
-from codara.accounts.vault import CredentialVault
 from codara.runtime_log_store import RuntimeLogStore
+from codara.cli_run_store import CliRunStore
+from codara.file_tail_hub import FileTailHub
 from codara.channels.service import ChannelService
 from codara.channels.telegram import TelegramChannelAdapter, TelegramPollingManager, register_telegram_bot_commands
 from codara.telemetry import current_request_id, current_trace_id, record_event, start_span, start_trace
 from codara.workspace.engine import WorkspaceEngine
 from codara.workspace.manager import WorkspaceManager
-from codara.workspace.project import PROJECT_TEMPLATES, ProjectService
+from codara.workspace.service import WORKSPACE_TEMPLATES, WorkspaceService
 from codara.services.inference import AttachmentInput, InferenceService
 from codara.version import check_for_update, get_version
 
@@ -61,10 +63,8 @@ TAG_PLAYGROUND = "Playground"
 TAG_MANAGEMENT_AUTH = "Management Authentication"
 TAG_MANAGEMENT_USERS = "Management Users"
 TAG_MANAGEMENT_WORKSPACES = "Management Workspaces"
-TAG_MANAGEMENT_PROJECTS = "Management Projects"
+TAG_MANAGEMENT_WORKSPACES_V2 = "Management Workspaces V2"
 TAG_MANAGEMENT_SESSIONS = "Management Sessions"
-TAG_MANAGEMENT_ACCOUNTS = "Management Accounts"
-TAG_MANAGEMENT_USAGE = "Management Usage"
 TAG_MANAGEMENT_OBSERVABILITY = "Management Observability"
 TAG_MANAGEMENT_AUDIT = "Management Audit"
 
@@ -75,7 +75,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": TAG_USER_SELF_SERVICE,
-        "description": "User self-service endpoints for keys, sessions, usage, and workspace state.",
+        "description": "User self-service endpoints for keys, sessions, and workspace state.",
     },
     {
         "name": TAG_PLAYGROUND,
@@ -94,20 +94,12 @@ OPENAPI_TAGS = [
         "description": "Inventory and lifecycle management for provisioned workspaces.",
     },
     {
-        "name": TAG_MANAGEMENT_PROJECTS,
-        "description": "User-facing project aliases backed by managed workspaces.",
+        "name": TAG_MANAGEMENT_WORKSPACES_V2,
+        "description": "User-facing workspaces stored in the database.",
     },
     {
         "name": TAG_MANAGEMENT_SESSIONS,
         "description": "Inspection and control of persisted runtime sessions.",
-    },
-    {
-        "name": TAG_MANAGEMENT_ACCOUNTS,
-        "description": "Provider account registration, selection, and status management.",
-    },
-    {
-        "name": TAG_MANAGEMENT_USAGE,
-        "description": "Usage reporting and refresh endpoints.",
     },
     {
         "name": TAG_MANAGEMENT_OBSERVABILITY,
@@ -132,6 +124,9 @@ user_api_key_scheme = HTTPBearer(
     scheme_name="User API Key",
     description="Use a provisioned user API key that starts with uagk_.",
 )
+
+OPERATOR_ACCESS_COOKIE = "uag_op_access"
+OPERATOR_REFRESH_COOKIE = "uag_op_refresh"
 
 
 _DOTENV_CACHE: dict[str, Optional[str]] = {}
@@ -257,6 +252,35 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     }
     return _encode_payload(payload)
 
+
+def _set_operator_cookies(response: JSONResponse, *, access_token: str, refresh_token: str) -> None:
+    # Use SameSite=Strict to reduce CSRF risk for cookie-authenticated management endpoints.
+    # Secure is disabled by default so local http:// dev works; production should terminate TLS.
+    response.set_cookie(
+        OPERATOR_ACCESS_COOKIE,
+        access_token,
+        httponly=True,
+        samesite="strict",
+        secure=False,
+        path="/",
+        max_age=8 * 60 * 60,
+    )
+    response.set_cookie(
+        OPERATOR_REFRESH_COOKIE,
+        refresh_token,
+        httponly=True,
+        samesite="strict",
+        secure=False,
+        path="/management/v1/auth",
+        max_age=7 * 24 * 60 * 60,
+    )
+
+
+def _clear_operator_cookies(response: JSONResponse) -> None:
+    response.delete_cookie(OPERATOR_ACCESS_COOKIE, path="/")
+    response.delete_cookie(OPERATOR_REFRESH_COOKIE, path="/management/v1/auth")
+
+
 async def get_current_operator(
     request: Request,
     token: Optional[str] = Depends(oauth2_scheme),
@@ -268,11 +292,14 @@ async def get_current_operator(
     bearer_token = credentials.credentials.strip() if isinstance(credentials, HTTPAuthorizationCredentials) else None
     if auth_header.startswith("Bearer "):
         bearer_token = auth_header.removeprefix("Bearer ").strip()
+    cookie_token = request.cookies.get(OPERATOR_ACCESS_COOKIE)
     if bearer_token:
         if bearer_token == _operator_passkey():
             return {"id": "svc-account-01", "scope": "operator"}
         if not token:
             token = bearer_token
+    if not token and cookie_token:
+        token = cookie_token.strip()
 
     if not token:
         # print(f"DEBUG: get_current_operator failed - no token. auth_header: {auth_header[:20]}...")
@@ -425,56 +452,16 @@ def _ensure_dashboard_admin_user():
     return user, api_key
 
 
-def _infer_provider_auth_type(raw_credential: str) -> AuthType:
-    stripped = raw_credential.strip()
-    if stripped.startswith("{") or stripped.startswith("["):
-        return AuthType.OAUTH_SESSION
-    return AuthType.API_KEY
-
-
-def _bootstrap_playground_provider_account(provider: ProviderType) -> Optional[Account]:
-    if provider != ProviderType.CODEX:
-        return None
-
-    pool = AccountPool(db_manager)
-    account = pool.acquire_account(provider)
-    if account:
-        return account
-
-    credential = CredentialVault().load_cli_credential(provider)
-    if not credential or not credential.strip():
-        return None
-
-    account_id = f"playground-{provider.value}-cli"
-    existing = db_manager.get_account(account_id)
-    auth_type = _infer_provider_auth_type(credential)
-    if existing:
-        existing.auth_type = auth_type
-        existing.label = existing.label or f"{provider.value.capitalize()} Playground CLI"
-        existing.status = "ready"
-        updated = pool.update_credential(account_id, credential)
-        db_manager.save_account(updated or existing)
-    else:
-        bootstrap = Account(
-            account_id=account_id,
-            provider=provider,
-            auth_type=auth_type,
-            label=f"{provider.value.capitalize()} Playground CLI",
-            status="ready",
-        )
-        pool.register_account(bootstrap, credential)
-    return db_manager.get_account(account_id)
-
-
 async def _execute_user_bound_chat(
     chat_request: "ChatCompletionRequest",
     *,
+    options,
     user,
     api_key,
     default_session_label: Optional[str] = None,
     uploaded_files: Optional[list[UploadFile]] = None,
 ):
-    options = chat_request.normalized_options()
+    # options is passed by caller to ensure modifications are visible
     attachment_inputs = await _attachment_inputs_from_uploads(uploaded_files or [])
     result, workspace_root, workspace_id, attachments = await _inference_service().execute_user_turn(
         model=chat_request.model,
@@ -486,6 +473,63 @@ async def _execute_user_bound_chat(
         attachments=attachment_inputs,
     )
     return result, workspace_root, workspace_id, attachments
+
+
+async def _execute_user_bound_chat_legacy(
+    chat_request: "ChatCompletionRequest",
+    *,
+    user,
+    api_key,
+    default_session_label: Optional[str] = None,
+    uploaded_files: Optional[list[UploadFile]] = None,
+):
+    options = chat_request.normalized_options()
+    return await _execute_user_bound_chat(
+        chat_request,
+        options=options,
+        user=user,
+        api_key=api_key,
+        default_session_label=default_session_label,
+        uploaded_files=uploaded_files,
+    )
+
+
+async def _execute_user_bound_chat_v1(
+    chat_request: "ChatCompletionRequest",
+    *,
+    options,
+    user,
+    api_key,
+    default_session_label: Optional[str] = None,
+    uploaded_files: Optional[list[UploadFile]] = None,
+):
+    return await _execute_user_bound_chat(
+        chat_request,
+        options=options,
+        user=user,
+        api_key=api_key,
+        default_session_label=default_session_label,
+        uploaded_files=uploaded_files,
+    )
+
+
+async def _execute_user_bound_chat_v2(
+    chat_request: "ChatCompletionRequest",
+    *,
+    options,
+    user,
+    api_key,
+    default_session_label: Optional[str] = None,
+    uploaded_files: Optional[list[UploadFile]] = None,
+):
+    return await _execute_user_bound_chat(
+        chat_request,
+        options=options,
+        user=user,
+        api_key=api_key,
+        default_session_label=default_session_label,
+        uploaded_files=uploaded_files,
+    )
 
 
 async def _parse_chat_request(http_request: Request) -> tuple["ChatCompletionRequest", list[UploadFile]]:
@@ -628,35 +672,6 @@ def _raise_chat_runtime_error(exc: RuntimeError):
     raise exc
 
 
-def _serialize_user(user, summary: Optional[dict] = None):
-    summary = summary or {}
-    usage_rows = db_manager.get_user_usage(user.user_id)
-    total_input = summary.get("total_input_tokens_30d", sum(row["input_tokens"] for row in usage_rows))
-    total_output = summary.get("total_output_tokens_30d", sum(row["output_tokens"] for row in usage_rows))
-    total_cache = summary.get("total_cache_hit_tokens_30d", sum(row["cache_hit_tokens"] for row in usage_rows))
-    total_requests = summary.get("total_requests_30d", sum(row["request_count"] for row in usage_rows))
-    return {
-        "user_id": user.user_id,
-        "email": user.email,
-        "display_name": user.display_name,
-        "status": user.status.value if hasattr(user.status, "value") else user.status,
-        "workspace_path": user.workspace_path,
-        "workspace_strategy": "base-plus-workspace-id",
-        "created_at": user.created_at.isoformat(),
-        "created_by": user.created_by,
-        "updated_at": user.updated_at.isoformat(),
-        "api_key_policy": "single-active-key",
-        "max_concurrency": user.max_concurrency,
-        "active_keys": summary.get("active_keys", len([k for k in db_manager.list_api_keys(user.user_id) if k.status == "active"])),
-        "active_sessions": summary.get("active_sessions", db_manager.count_user_sessions(user.user_id)),
-        "total_input_tokens_30d": total_input,
-        "total_output_tokens_30d": total_output,
-        "total_cache_hit_tokens_30d": total_cache,
-        "total_tokens_30d": total_input + total_output,
-        "total_requests_30d": total_requests,
-    }
-
-
 def _serialize_api_key(key):
     return {
         "key_id": key.key_id,
@@ -712,7 +727,6 @@ def _serialize_session(session: Session, binding: Optional[dict] = None) -> dict
         "client_session_id": session.client_session_id,
         "backend_id": session.backend_id,
         "provider": session.provider.value,
-        "account_id": session.account_id,
         "user_id": binding.get("user_id", session.user_id),
         "user_display_name": binding.get("user_display_name"),
         "user_email": binding.get("user_email"),
@@ -720,9 +734,7 @@ def _serialize_session(session: Session, binding: Optional[dict] = None) -> dict
         "api_key_label": binding.get("api_key_label"),
         "api_key_prefix": binding.get("api_key_prefix"),
         "cwd_path": session.cwd_path,
-        "prefix_hash": session.prefix_hash,
         "status": session.status.value,
-        "fence_token": session.fence_token,
         "created_at": int(session.created_at.replace(tzinfo=timezone.utc).timestamp()),
         "updated_at": int(session.updated_at.replace(tzinfo=timezone.utc).timestamp()),
         "expires_at": int(session.expires_at.replace(tzinfo=timezone.utc).timestamp()),
@@ -733,12 +745,11 @@ def _workspace_manager() -> WorkspaceManager:
     return WorkspaceManager(
         db_manager,
         workspaces_root=settings.workspaces_root,
-        isolated_envs_root=settings.isolated_envs_root,
     )
 
 
-def _project_service() -> ProjectService:
-    return ProjectService(_workspace_manager())
+def _workspace_service_v2() -> WorkspaceService:
+    return WorkspaceService(_workspace_manager(), db_manager)
 
 
 def _inference_service() -> InferenceService:
@@ -754,6 +765,20 @@ def _runtime_log_store() -> RuntimeLogStore:
     if not runtime_root.is_absolute():
         runtime_root = Path(settings.logs_root).expanduser().resolve() / runtime_root
     return RuntimeLogStore(str(runtime_root))
+
+
+def _cli_run_store() -> CliRunStore:
+    return CliRunStore(settings=settings)
+
+
+_tail_hub: FileTailHub | None = None
+
+
+def _file_tail_hub() -> FileTailHub:
+    global _tail_hub
+    if _tail_hub is None:
+        _tail_hub = FileTailHub()
+    return _tail_hub
 
 
 def _telegram_adapter(bot_name: str) -> TelegramChannelAdapter:
@@ -877,219 +902,6 @@ def _serialize_workspace(record: dict, *, include_details: bool = False) -> dict
     return payload
 
 
-def _account_has_usage_observation(account: Account) -> bool:
-    return any(
-        value is not None
-        for value in (
-            account.last_seen_at,
-            account.usage_source,
-            account.hourly_used_pct,
-            account.weekly_used_pct,
-            account.hourly_reset_at,
-            account.weekly_reset_at,
-            account.rate_limit_allowed,
-            account.rate_limit_reached,
-            account.credits_has_credits,
-            account.credits_unlimited,
-            account.credits_overage_limit_reached,
-        )
-    )
-
-
-def _serialize_account(account: Account, sessions_bound: Optional[int] = None) -> dict:
-    usage_observed = _account_has_usage_observation(account)
-    hourly_limit = account.hourly_limit if usage_observed else None
-    weekly_limit = account.weekly_limit if usage_observed else None
-    hourly_left = max(hourly_limit - account.usage_hourly, 0) if hourly_limit is not None else None
-    weekly_left = max(weekly_limit - account.usage_weekly, 0) if weekly_limit is not None else None
-    if sessions_bound is None:
-        with db_manager._get_connection() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS count FROM sessions WHERE account_id = ?",
-                (account.account_id,),
-            ).fetchone()
-        sessions_bound = int(row["count"] if row else 0)
-    return {
-        "account_id": account.account_id,
-        "credential_id": account.credential_id or account.account_id,
-        "provider": account.provider.value,
-        "auth_type": account.auth_type.value,
-        "label": account.label,
-        "status": account.status,
-        "auth_index": account.auth_index,
-        "cli_primary": account.cli_primary,
-        "allocation": "cli-primary" if account.cli_primary else "pool",
-        "cli_name": account.provider.value,
-        "sessions_bound": sessions_bound,
-        "usage_tpm": account.usage_tpm,
-        "usage_rpd": account.usage_rpd,
-        "usage_hourly": account.usage_hourly,
-        "usage_weekly": account.usage_weekly,
-        "tpm_limit": account.tpm_limit,
-        "rpd_limit": account.rpd_limit,
-        "hourly_limit": hourly_limit,
-        "weekly_limit": weekly_limit,
-        "hourly_left": hourly_left,
-        "weekly_left": weekly_left,
-        "hourly_left_pct": round((hourly_left / hourly_limit) * 100, 2) if hourly_left is not None and hourly_limit else None,
-        "weekly_left_pct": round((weekly_left / weekly_limit) * 100, 2) if weekly_left is not None and weekly_limit else None,
-        "hourly_used_pct": account.hourly_used_pct,
-        "weekly_used_pct": account.weekly_used_pct,
-        "hourly_reset_after_seconds": account.hourly_reset_after_seconds,
-        "weekly_reset_after_seconds": account.weekly_reset_after_seconds,
-        "hourly_reset_at": account.hourly_reset_at.isoformat() if account.hourly_reset_at else None,
-        "weekly_reset_at": account.weekly_reset_at.isoformat() if account.weekly_reset_at else None,
-        "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
-        "last_seen_at": account.last_seen_at.isoformat() if account.last_seen_at else None,
-        "last_used_at": account.last_used_at.isoformat() if account.last_used_at else None,
-        "access_token_expires_at": account.access_token_expires_at.isoformat() if account.access_token_expires_at else None,
-        "usage_source": account.usage_source,
-        "plan_type": account.plan_type,
-        "rate_limit_allowed": account.rate_limit_allowed,
-        "rate_limit_reached": account.rate_limit_reached,
-        "credits_has_credits": account.credits_has_credits,
-        "credits_unlimited": account.credits_unlimited,
-        "credits_overage_limit_reached": account.credits_overage_limit_reached,
-        "approx_local_messages_min": account.approx_local_messages_min,
-        "approx_local_messages_max": account.approx_local_messages_max,
-        "approx_cloud_messages_min": account.approx_cloud_messages_min,
-        "approx_cloud_messages_max": account.approx_cloud_messages_max,
-        "remaining_compute_hours": account.remaining_compute_hours,
-        "usage_observed": usage_observed,
-        "masked_credential": None,
-    }
-
-
-def _account_session_count_map(account_ids: list[str]) -> dict[str, int]:
-    if not account_ids:
-        return {}
-    placeholders = ", ".join("?" for _ in account_ids)
-    with db_manager._get_connection() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT account_id, COUNT(*) AS count
-            FROM sessions
-            WHERE account_id IN ({placeholders})
-            GROUP BY account_id
-            """,
-            account_ids,
-        ).fetchall()
-    return {row["account_id"]: int(row["count"]) for row in rows}
-
-
-def _user_summary_map(user_ids: list[str]) -> dict[str, dict[str, int]]:
-    if not user_ids:
-        return {}
-    placeholders = ", ".join("?" for _ in user_ids)
-    summary = {user_id: {
-        "active_keys": 0,
-        "active_sessions": 0,
-        "total_input_tokens_30d": 0,
-        "total_output_tokens_30d": 0,
-        "total_cache_hit_tokens_30d": 0,
-        "total_requests_30d": 0,
-    } for user_id in user_ids}
-    with db_manager._get_connection() as conn:
-        key_rows = conn.execute(
-            f"""
-            SELECT user_id, COUNT(*) AS count
-            FROM api_keys
-            WHERE status = 'active' AND user_id IN ({placeholders})
-            GROUP BY user_id
-            """,
-            user_ids,
-        ).fetchall()
-        for row in key_rows:
-            summary[row["user_id"]]["active_keys"] = int(row["count"])
-
-        like_clauses = " OR ".join("client_session_id LIKE ?" for _ in user_ids)
-        session_rows = conn.execute(
-            f"""
-            SELECT client_session_id
-            FROM sessions
-            WHERE {like_clauses}
-            """,
-            [f"{user_id}::%" for user_id in user_ids],
-        ).fetchall()
-        for row in session_rows:
-            session_id = row["client_session_id"]
-            user_id = session_id.split("::", 1)[0]
-            if user_id in summary:
-                summary[user_id]["active_sessions"] += 1
-
-        usage_rows = conn.execute(
-            f"""
-            SELECT user_id,
-                   COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                   COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                   COALESCE(SUM(cache_hit_tokens), 0) AS cache_hit_tokens,
-                   COALESCE(SUM(request_count), 0) AS request_count
-            FROM user_usage
-            WHERE user_id IN ({placeholders})
-            GROUP BY user_id
-            """,
-            user_ids,
-        ).fetchall()
-        for row in usage_rows:
-            bucket = summary[row["user_id"]]
-            bucket["total_input_tokens_30d"] = int(row["input_tokens"])
-            bucket["total_output_tokens_30d"] = int(row["output_tokens"])
-            bucket["total_cache_hit_tokens_30d"] = int(row["cache_hit_tokens"])
-            bucket["total_requests_30d"] = int(row["request_count"])
-    return summary
-
-
-def _page_meta(items: list[object], cursor_field: str) -> dict:
-    cursor = None
-    if items:
-        last = items[-1]
-        if isinstance(last, dict):
-            cursor = last.get(cursor_field)
-    return {"page": {"cursor": cursor, "has_more": bool(items) and cursor is not None}}
-
-
-def _parse_time_filter(value: Optional[str]) -> Optional[int]:
-    if value is None or not str(value).strip():
-        return None
-    raw = str(value).strip()
-    try:
-        numeric = float(raw)
-        # Browser/API clients generally send milliseconds; support seconds too.
-        if numeric < 10_000_000_000:
-            numeric *= 1000
-        return int(numeric)
-    except ValueError:
-        pass
-    try:
-        normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
-        parsed = datetime.fromisoformat(normalized)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return int(parsed.timestamp() * 1000)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid time filter: {value}") from exc
-
-
-def _serialize_activity(row: dict) -> dict:
-    timestamp = row.get("timestamp")
-    return {
-        "turn_id": row.get("turn_id"),
-        "client_session_id": row.get("client_session_id"),
-        "provider": row.get("provider"),
-        "account_id": row.get("account_id"),
-        "input_tokens": row.get("input_tokens", 0),
-        "output_tokens": row.get("output_tokens", 0),
-        "finish_reason": row.get("finish_reason"),
-        "duration_ms": row.get("duration_ms", 0),
-        "timestamp": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
-        "cwd_path": row.get("cwd_path"),
-        "session_status": row.get("session_status"),
-        "api_key_id": row.get("api_key_id"),
-        "api_key_label": row.get("api_key_label"),
-        "api_key_prefix": row.get("key_prefix"),
-    }
-
-
 def _build_chat_completion_response(model: str, options: UagOptions, result: TurnResult, extra_extensions: Optional[dict] = None):
     return {
         "id": f"chatcmpl-{result.backend_id}",
@@ -1101,17 +913,16 @@ def _build_chat_completion_response(model: str, options: UagOptions, result: Tur
             "message": {"role": "assistant", "content": result.output},
             "finish_reason": result.finish_reason
         }],
-        "extensions": {
-            "modified_files": result.modified_files,
-            "diff": result.diff,
-            "actions": result.actions,
-            "dirty": result.dirty,
-            "client_session_id": options.client_session_id,
-            "workspace_id": options.workspace_id,
-            "reported_context_tokens": result.context_tokens,
-            **(extra_extensions or {}),
-        }
-    }
+	        "extensions": {
+	            "modified_files": result.modified_files,
+	            "diff": result.diff,
+	            "actions": result.actions,
+	            "dirty": result.dirty,
+	            "client_session_id": options.client_session_id,
+	            "workspace_id": options.workspace_id,
+	            **(extra_extensions or {}),
+	        }
+	    }
 
 # --- App Initialization ---
 
@@ -1120,16 +931,73 @@ app = FastAPI(
     openapi_tags=OPENAPI_TAGS,
 )
 db_manager = DatabaseManager(settings.database_path)
-usage_monitor = UsageMonitor(db_manager)
 orchestrator = Orchestrator(db_manager)
 management_router = APIRouter(prefix="/management/v1", dependencies=[Depends(get_current_operator)])
 auth_router = APIRouter(prefix="/management/v1/auth")
 user_router = APIRouter(prefix="/v1/user")
 channel_router = APIRouter(prefix="/channels")
 
+AUDIT_EVENTS = deque(maxlen=500)
+RUNTIME_LOGS = deque(maxlen=1000)
+
+_audit_log_store = None
+
+
+def _get_audit_log_store():
+    global _audit_log_store
+    if _audit_log_store is None:
+        from pathlib import Path
+        from codara.config import get_settings
+        settings = get_settings()
+        root = Path(settings.logs_root).expanduser().resolve() / settings.audit_log_root
+        from codara.audit_log_store import AuditLogStore
+        _audit_log_store = AuditLogStore(str(root))
+    return _audit_log_store
+
+
+def emit_audit_event(actor: str, action: str, target_type: str, target_id: str,
+                   before: Optional[dict] = None, after: Optional[dict] = None):
+    import uuid
+    ts = int(datetime.now(timezone.utc).timestamp())
+    
+    def _serialize(obj):
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            return {k: _serialize(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_serialize(v) for v in obj]
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        return obj
+    
+    event = {
+        "id": f"aud_{uuid.uuid4().hex[:12]}",
+        "actor": actor,
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "before": _serialize(before),
+        "after": _serialize(after),
+        "timestamp": ts,
+    }
+    AUDIT_EVENTS.append(event)
+    _get_audit_log_store().append(event)
+
+
+def emit_runtime_log(log: dict):
+    RUNTIME_LOGS.append(log)
+
+
+from codara.logging_setup import register_runtime_log_emitter
+register_runtime_log_emitter(emit_runtime_log)
+
 
 @app.on_event("startup")
-async def startup_channel_workers():
+async def startup_event():
+    setup_dashboard(app)
     global telegram_polling_manager
     await register_telegram_bot_commands(_telegram_adapters_for_enabled_bots())
     manager = _telegram_polling_manager()
@@ -1276,6 +1144,59 @@ async def telemetry_http_middleware(request: Request, call_next):
         )
         return response
 
+
+def _serialize_user(user, summary: Optional[dict] = None) -> dict:
+    summary = summary or {}
+    return {
+        "user_id": user.user_id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "status": user.status.value if hasattr(user.status, "value") else user.status,
+        "workspace_path": user.workspace_path,
+        "workspace_strategy": "base-plus-workspace-id",
+        "created_at": user.created_at.isoformat(),
+        "created_by": user.created_by,
+        "updated_at": user.updated_at.isoformat(),
+        "api_key_policy": "single-active-key",
+        "max_concurrency": user.max_concurrency,
+        "active_keys": summary.get("active_keys", len([k for k in db_manager.list_api_keys(user.user_id) if k.status == "active"])),
+        "active_sessions": summary.get("active_sessions", db_manager.count_user_sessions(user.user_id)),
+        "summary": summary,
+    }
+
+def _serialize_activity(row: dict) -> dict:
+    timestamp = row.get("timestamp")
+    return {
+        "turn_id": row.get("turn_id"),
+        "session_id": row.get("client_session_id"), # In activity rows, it is client_session_id
+        "client_session_id": row.get("client_session_id"),
+        "user_id": row.get("user_id"),
+        "api_key_label": row.get("api_key_label") or "primary",
+        "provider": row.get("provider"),
+        "model": row.get("model"),
+        "duration_ms": row.get("duration_ms", 0),
+        "timestamp": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
+        "status": row.get("status"),
+    }
+
+
+def _user_summary_map(user_ids: list[str]) -> dict[str, dict]:
+    result = {}
+    for uid in user_ids:
+        u = db_manager.get_user(uid)
+        if u:
+            result[uid] = {"user_id": u.user_id, "email": u.email, "display_name": u.display_name}
+    return result
+
+
+def _page_meta(items: list, cursor_field: str) -> dict:
+    if not items:
+        return {"next_cursor": None, "has_more": False}
+    return {
+        "next_cursor": items[-1].get(cursor_field) if isinstance(items[-1], dict) else getattr(items[-1], cursor_field, None),
+        "has_more": len(items) > 0,
+    }
+
 # --- Inference API (SRDS §10) ---
 
 class ChatCompletionRequest(BaseModel):
@@ -1397,7 +1318,7 @@ class CreateChannelLinkTokenRequest(BaseModel):
     expires_in_minutes: int = 30
 
 
-class CreateProjectRequest(BaseModel):
+class CreateWorkspaceRequest(BaseModel):
     name: str
     template: str = "default"
     default_provider: Optional[ProviderType] = None
@@ -1441,38 +1362,31 @@ async def chat_completions(
         chat_request, uploaded_files = await _parse_chat_request(http_request)
         options = chat_request.normalized_options()
         authorization = http_request.headers.get("authorization", "")
-        if authorization.startswith("Bearer uagk_"):
+        token: Optional[str] = None
+        if authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication token missing",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if token.startswith("uagk_"):
             user_context = await get_current_user(http_request)
             user = user_context["user"]
             api_key = user_context["api_key"]
             result, _, _, attachments = await _execute_user_bound_chat(
                 chat_request,
+                options=options,
                 user=user,
                 api_key=api_key,
                 uploaded_files=uploaded_files,
             )
-        elif authorization == f"Bearer {_operator_passkey()}":
-            # Allow direct use of operator passkey as a bearer token for internal/automated turns
-            options.workspace_root = _validate_direct_workspace_root(
-                options.workspace_root
-            )
-            attachments = await _materialize_chat_uploads(
-                options.workspace_root,
-                chat_request.messages,
-                uploaded_files,
-                session_label=options.client_session_id,
-            )
-            provider_model = resolve_provider_model(
-                options.provider,
-                chat_request.model,
-                settings,
-            )
-            result = await orchestrator.handle_request(
-                options,
-                chat_request.messages,
-                provider_model=provider_model,
-            )
         else:
+            # Operator-authenticated turn (passkey or operator access token).
+            if token != _operator_passkey():
+                _validate_operator_token(token)
             options.workspace_root = _validate_direct_workspace_root(
                 options.workspace_root
             )
@@ -1533,16 +1447,25 @@ async def login(payload: Optional[OperatorTokenRequest] = None):
         data={"sub": "operator", "scope": "operator", "token_type": "refresh"},
         expires_delta=timedelta(days=7),
     )
-    return envelope({
+    resp = JSONResponse(
+        envelope(
+            {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-    })
+            }
+        )
+    )
+    _set_operator_cookies(resp, access_token=access_token, refresh_token=refresh_token)
+    return resp
 
 
 @auth_router.post("/refresh", tags=[TAG_MANAGEMENT_AUTH], summary="Refresh an operator access token")
-async def refresh_operator_token(payload: OperatorRefreshRequest):
-    token_payload = _validate_operator_token(payload.refresh_token)
+async def refresh_operator_token(http_request: Request, payload: Optional[OperatorRefreshRequest] = None):
+    token = (payload.refresh_token if payload else None) or ""
+    if not token:
+        token = http_request.cookies.get(OPERATOR_REFRESH_COOKIE) or ""
+    token_payload = _validate_operator_token(token)
     if token_payload.get("token_type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     access_token = create_access_token(data={"sub": "operator", "scope": "operator", "token_type": "access"})
@@ -1550,11 +1473,29 @@ async def refresh_operator_token(payload: OperatorRefreshRequest):
         data={"sub": "operator", "scope": "operator", "token_type": "refresh"},
         expires_delta=timedelta(days=7),
     )
-    return envelope({
+    resp = JSONResponse(
+        envelope(
+            {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-    })
+            }
+        )
+    )
+    _set_operator_cookies(resp, access_token=access_token, refresh_token=refresh_token)
+    return resp
+
+
+@auth_router.get("/me", tags=[TAG_MANAGEMENT_AUTH], summary="Get current operator identity")
+async def operator_me(current_operator: dict = Depends(get_current_operator)):
+    return envelope({"id": current_operator["id"], "scope": current_operator["scope"]})
+
+
+@auth_router.post("/logout", tags=[TAG_MANAGEMENT_AUTH], summary="Clear operator auth cookies")
+async def operator_logout():
+    resp = JSONResponse(envelope({"ok": True}))
+    _clear_operator_cookies(resp)
+    return resp
 
 
 @management_router.get("/users", tags=[TAG_MANAGEMENT_USERS], summary="List provisioned users")
@@ -1570,12 +1511,16 @@ async def get_user(user_id: str):
     user = db_manager.get_user(user_id)
     if not user:
         raise HTTPException(404, "User not found")
-    data = _serialize_user(user)
+    
+    # Get user summary for active keys and activity
+    summary_map = _user_summary_map([user_id])
+    data = _serialize_user(user, summary_map.get(user_id))
+    
+    # Add detailed lists
     data["api_keys"] = [_serialize_api_key(key) for key in db_manager.list_active_api_keys(user_id)]
     sessions = db_manager.get_user_sessions(user_id)
     bindings = _session_binding_map([session.client_session_id for session in sessions])
     data["sessions"] = [_serialize_session(session, bindings.get(session.client_session_id)) for session in sessions]
-    data["usage"] = db_manager.get_user_usage(user_id)
     data["recent_activity"] = [_serialize_activity(row) for row in db_manager.get_recent_user_activity(user_id)]
     data["resets"] = db_manager.get_workspace_resets(user_id)
     return envelope(data)
@@ -1594,17 +1539,28 @@ async def create_user(payload: CreateUserRequest, current_operator: dict = Depen
         max_concurrency=payload.max_concurrency,
         user_id=user_id,
     )
+    
+    # Also create a 'default' workspace entry in DB
+    _workspace_service_v2().create_workspace(
+        "default",
+        user_id,
+        template="empty",
+    )
     raw_key = generate_api_key()
     key = db_manager.save_api_key(user.user_id, raw_key, label=payload.key_label, expires_at=payload.key_expires_at)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.registered",
         target_type="user",
         target_id=user.user_id,
         after=user.model_dump(),
     )
+    # Use rich serialization to ensure UI gets all fields
+    summary_map = _user_summary_map([user.user_id])
+    data = _serialize_user(user, summary_map.get(user.user_id))
+    
     return envelope({
-        **_serialize_user(user),
+        **data,
         "api_key": {
             "key_id": key.key_id,
             "raw_key": raw_key,
@@ -1626,7 +1582,7 @@ async def update_user(user_id: str, payload: UpdateUserRequest, current_operator
         user.max_concurrency = max(payload.max_concurrency, 1)
     user.updated_at = datetime.now(timezone.utc)
     db_manager.save_user(user)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.updated",
         target_type="user",
@@ -1642,7 +1598,7 @@ async def suspend_user(user_id: str, current_operator: dict = Depends(get_curren
     user = db_manager.update_user_status(user_id, UserStatus.SUSPENDED)
     if not user:
         raise HTTPException(404, "User not found")
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.suspended",
         target_type="user",
@@ -1657,7 +1613,7 @@ async def unsuspend_user(user_id: str, current_operator: dict = Depends(get_curr
     user = db_manager.update_user_status(user_id, UserStatus.ACTIVE)
     if not user:
         raise HTTPException(404, "User not found")
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.unsuspended",
         target_type="user",
@@ -1679,7 +1635,7 @@ async def delete_user(user_id: str, current_operator: dict = Depends(get_current
     with db_manager._get_connection() as conn:
         conn.execute("UPDATE api_keys SET status = 'revoked', revoked_at = ? WHERE user_id = ?", (db_manager._now_ms(), user_id))
         conn.commit()
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.deleted",
         target_type="user",
@@ -1704,7 +1660,7 @@ async def revoke_user_key(user_id: str, key_id: str, current_operator: dict = De
     if key.status == "active" and len(active_keys) <= 1:
         raise HTTPException(status_code=400, detail="Rotate the user's API key instead of revoking the only active key")
     db_manager.revoke_api_key(key_id)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.key.revoked",
         target_type="api_key",
@@ -1721,7 +1677,7 @@ async def rotate_user_key(user_id: str, payload: CreateUserKeyRequest, current_o
         raise HTTPException(404, "User not found")
     raw_key = generate_api_key()
     key = db_manager.save_api_key(user.user_id, raw_key, label=payload.label, expires_at=payload.expires_at)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="user.key.rotated",
         target_type="api_key",
@@ -1755,7 +1711,7 @@ async def create_channel_link_token(user_id: str, payload: CreateChannelLinkToke
         created_by=f"operator:{current_operator['id']}",
         expires_in_minutes=payload.expires_in_minutes,
     )
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="channel.link_token.created",
         target_type="user",
@@ -1775,7 +1731,7 @@ async def reset_user_workspace(user_id: str, current_operator: dict = Depends(ge
     for session in sessions:
         db_manager.delete_session(session.client_session_id)
     reset = db_manager.record_workspace_reset(user_id, "operator", f"operator:{current_operator['id']}", wiped)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="workspace.reset",
         target_type="user",
@@ -1790,6 +1746,44 @@ async def reset_user_workspace(user_id: str, current_operator: dict = Depends(ge
         "reset_at": reset.reset_at.isoformat(),
         "triggered_by": "operator",
     })
+
+
+@management_router.get("/workspaces/v2", tags=[TAG_MANAGEMENT_WORKSPACES_V2], summary="List managed workspaces v2")
+async def list_workspaces_v2():
+    records = _workspace_service_v2().list_workspaces_v2()
+    return envelope([record.model_dump() for record in records])
+
+
+@management_router.post("/workspaces/v2", tags=[TAG_MANAGEMENT_WORKSPACES_V2], summary="Create a managed workspace v2")
+async def create_workspace_v2(request: CreateWorkspaceRequest, current_operator: dict = Depends(get_current_operator)):
+    try:
+        result = _workspace_service_v2().create_workspace(
+            request.name,
+            user_id=f"operator:{current_operator['id']}",
+            template=request.template,
+            default_provider=request.default_provider.value if request.default_provider else None,
+            force=request.force,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+    payload = result.model_dump()
+    emit_audit_event(
+        actor=f"operator:{current_operator['id']}",
+        action="workspace.created",
+        target_type="workspace",
+        target_id=result.workspace_id,
+        after=payload,
+    )
+    return envelope(payload, meta={"templates": sorted(WORKSPACE_TEMPLATES)})
+
+
+@management_router.get("/workspaces/v2/{workspace_id}", tags=[TAG_MANAGEMENT_WORKSPACES_V2], summary="Get a managed workspace v2")
+async def get_workspace_detail_v2(workspace_id: str):
+    record = _workspace_service_v2().get_workspace_v2(workspace_id)
+    if not record:
+        raise HTTPException(404, "Workspace not found")
+    return envelope(record.model_dump())
 
 
 @management_router.get("/workspaces", tags=[TAG_MANAGEMENT_WORKSPACES], summary="List managed workspaces")
@@ -1817,7 +1811,7 @@ async def reset_workspace(workspace_id: str, current_operator: dict = Depends(ge
         wiped = manager.reset_workspace_sessions(workspace_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="workspace.reset",
         target_type="workspace",
@@ -1848,7 +1842,7 @@ async def delete_workspace(workspace_id: str, current_operator: dict = Depends(g
         wiped = manager.delete_workspace(workspace_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="workspace.deleted",
         target_type="workspace",
@@ -1867,62 +1861,16 @@ async def delete_workspace(workspace_id: str, current_operator: dict = Depends(g
     })
 
 
-@management_router.get("/projects", tags=[TAG_MANAGEMENT_PROJECTS], summary="List managed projects")
-async def list_projects():
-    records = _project_service().list_projects()
-    return envelope([_serialize_workspace(record) for record in records])
-
-
-@management_router.post("/projects", tags=[TAG_MANAGEMENT_PROJECTS], summary="Create a managed project")
-async def create_project(request: CreateProjectRequest, current_operator: dict = Depends(get_current_operator)):
-    try:
-        result = _project_service().create_project(
-            request.name,
-            template=request.template,
-            default_provider=request.default_provider.value if request.default_provider else None,
-            force=request.force,
-            created_by=f"operator:{current_operator['id']}",
-        )
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    record = _workspace_manager().get_workspace(result.path)
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="project.created" if result.created else "project.initialized",
-        target_type="project",
-        target_id=result.name,
-        after=result.to_dict(),
-    )
-    payload = _serialize_workspace(record, include_details=True) if record else result.to_dict()
-    return envelope(payload, meta={"templates": sorted(PROJECT_TEMPLATES)})
-
-
-@management_router.get("/projects/{project_id}", tags=[TAG_MANAGEMENT_PROJECTS], summary="Get a managed project")
-async def get_project_detail(project_id: str):
-    record = _project_service().get_project(_decode_workspace_id(project_id))
-    if not record:
-        raise HTTPException(404, "Project not found")
-    return envelope(_serialize_workspace(record, include_details=True))
-
-
-@management_router.get("/users/{user_id}/usage", tags=[TAG_MANAGEMENT_USERS], summary="Get usage for a user")
-async def get_user_usage(user_id: str):
-    return envelope(db_manager.get_user_usage(user_id))
-
-
 @management_router.post("/playground/chat", tags=[TAG_PLAYGROUND], summary="Run a playground chat turn")
 async def management_playground_chat(http_request: Request, current_operator: dict = Depends(get_current_operator)):
     chat_request, uploaded_files = await _parse_chat_request(http_request)
     options = chat_request.normalized_options()
     admin_user, api_key = _ensure_dashboard_admin_user()
-    _bootstrap_playground_provider_account(options.provider)
 
     try:
         result, workspace_root, workspace_id, attachments = await _execute_user_bound_chat(
             chat_request,
+            options=options,
             user=admin_user,
             api_key=api_key,
             default_session_label="playground",
@@ -1930,18 +1878,17 @@ async def management_playground_chat(http_request: Request, current_operator: di
         )
     except RuntimeError as e:
         _raise_chat_runtime_error(e)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"operator:{current_operator['id']}",
         action="playground.turn.executed",
         target_type="user",
         target_id=admin_user.user_id,
-        after={
-            "provider": options.provider.value,
-            "workspace_id": workspace_id,
-            "client_session_id": options.client_session_id,
-            "reported_context_tokens": result.context_tokens,
-        },
-    )
+	        after={
+	            "provider": options.provider.value,
+	            "workspace_id": workspace_id,
+	            "client_session_id": options.client_session_id,
+	        },
+	    )
     return _build_chat_completion_response(
         chat_request.model,
         options,
@@ -1971,7 +1918,7 @@ async def create_user_key(payload: CreateUserKeyRequest, current_user: dict = De
     user = current_user["user"]
     raw_key = generate_api_key()
     key = db_manager.save_api_key(user.user_id, raw_key, label=payload.label, expires_at=payload.expires_at)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"user:{user.user_id}",
         action="user.key.rotated",
         target_type="api_key",
@@ -1994,7 +1941,7 @@ async def revoke_own_key(key_id: str, current_user: dict = Depends(get_current_u
     if key.status == "active":
         raise HTTPException(400, "Rotate the active key instead of revoking it")
     db_manager.revoke_api_key(key_id)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"user:{user.user_id}",
         action="user.key.revoked",
         target_type="api_key",
@@ -2002,42 +1949,6 @@ async def revoke_own_key(key_id: str, current_user: dict = Depends(get_current_u
         before=key.model_dump(),
     )
     return envelope(_serialize_api_key(db_manager.get_api_key_by_hash(key.key_hash)))
-
-
-@user_router.get("/usage", tags=[TAG_USER_SELF_SERVICE], summary="Get the current user's usage summary")
-async def user_usage(current_user: dict = Depends(get_current_user)):
-    user = current_user["user"]
-    usage_rows = db_manager.get_user_usage(user.user_id)
-    total_input = sum(row["input_tokens"] for row in usage_rows)
-    total_output = sum(row["output_tokens"] for row in usage_rows)
-    total_cache = sum(row["cache_hit_tokens"] for row in usage_rows)
-    total_tokens = total_input + total_output
-    summary = {
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_cache_hit_tokens": total_cache,
-        "total_tokens": total_tokens,
-        "cache_hit_rate": round(total_cache / total_tokens, 4) if total_tokens else 0,
-        "total_requests": sum(row["request_count"] for row in usage_rows),
-    }
-    return envelope({
-        "window": {
-            "from": usage_rows[0]["period"] if usage_rows else None,
-            "to": usage_rows[-1]["period"] if usage_rows else None,
-        },
-        "summary": summary,
-        "by_day": usage_rows,
-        "by_provider": [
-            {
-                "provider": provider,
-                "input_tokens": sum(row["input_tokens"] for row in usage_rows if row["provider"] == provider),
-                "output_tokens": sum(row["output_tokens"] for row in usage_rows if row["provider"] == provider),
-                "cache_hit_tokens": sum(row["cache_hit_tokens"] for row in usage_rows if row["provider"] == provider),
-                "request_count": sum(row["request_count"] for row in usage_rows if row["provider"] == provider),
-            }
-            for provider in sorted({row["provider"] for row in usage_rows})
-        ],
-    })
 
 
 @user_router.get("/sessions", tags=[TAG_USER_SELF_SERVICE], summary="List the current user's sessions")
@@ -2069,7 +1980,7 @@ async def user_workspace_reset(current_user: dict = Depends(get_current_user)):
     for session in sessions:
         db_manager.delete_session(session.client_session_id)
     reset = db_manager.record_workspace_reset(user.user_id, "user", f"user:{user.user_id}", wiped)
-    db_manager.record_audit(
+    emit_audit_event(
         actor=f"user:{user.user_id}",
         action="workspace.reset",
         target_type="user",
@@ -2097,11 +2008,6 @@ async def user_provider_models(provider: Optional[ProviderType] = None, current_
 
 
 async def _provider_health_rows() -> list[dict]:
-    usage_summary = db_manager.get_usage_summary()
-    provider_totals = {row["provider"]: row for row in usage_summary.get("provider_totals", [])}
-    provider_accounts: dict[str, list[dict]] = {provider.value: [] for provider in ProviderType}
-    for row in usage_summary.get("providers", []):
-        provider_accounts.setdefault(row["provider"], []).append(row)
     provider_models = {
         row["provider"]: row
         for row in await _list_provider_models()
@@ -2109,43 +2015,15 @@ async def _provider_health_rows() -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     rows: list[dict] = []
     for provider in ProviderType:
-        accounts = provider_accounts.get(provider.value, [])
-        total_row = provider_totals.get(provider.value, {})
         model_row = provider_models.get(provider.value, {})
-        total_accounts = len(accounts)
-        cooldown_accounts = sum(1 for account in accounts if account["status"] == "cooldown")
-        expired_accounts = sum(1 for account in accounts if account["status"] == "expired")
-        active_accounts = sum(1 for account in accounts if account["status"] in {"active", "ready"})
-        cli_primary_accounts = sum(1 for account in accounts if account.get("cli_primary"))
-        usage_observed_accounts = sum(1 for account in accounts if account.get("usage_observed"))
-        latest_seen = max((account["last_seen_at"] for account in accounts if account.get("last_seen_at")), default=None)
-        total_tokens = sum((account.get("usage_weekly") or account.get("usage_hourly") or 0) for account in accounts)
         runtime_available = bool(model_row.get("runtime_available"))
-        if provider in {ProviderType.GEMINI, ProviderType.OPENCODE} and runtime_available:
-            status_value = "ok"
-        elif total_accounts == 0:
-            status_value = "down"
-        elif active_accounts > 0:
-            status_value = "ok"
-        elif cooldown_accounts > 0 or expired_accounts > 0:
-            status_value = "degraded"
-        else:
-            status_value = "degraded"
+        
         rows.append(
             {
                 "provider": provider.value,
-                "status": status_value,
-                "latency_ms": 0.0,
-                "active_sessions": total_row.get("active_sessions", db_manager.count_sessions(provider=provider.value, status="active")),
-                "accounts_total": total_accounts,
-                "accounts_available": active_accounts,
-                "accounts_active": active_accounts,
-                "accounts_in_cooldown": cooldown_accounts,
-                "accounts_expired": expired_accounts,
-                "cli_primary_accounts": cli_primary_accounts,
-                "usage_observed_accounts": usage_observed_accounts,
-                "total_tokens": total_tokens,
-                "last_seen_at": latest_seen,
+                "status": "ready" if runtime_available else "unavailable",
+                "active_sessions": db_manager.count_sessions(provider=provider.value, status="active"),
+                "last_seen_at": None,
                 "runtime_available": runtime_available,
                 "runtime_detail": model_row.get("detail"),
                 "models_status": model_row.get("status"),
@@ -2159,15 +2037,9 @@ async def _provider_health_rows() -> list[dict]:
 
 
 def _overview_summary() -> dict:
-    usage_summary = db_manager.get_usage_summary()
-    provider_rows = usage_summary.get("providers", [])
-    user_rows = usage_summary.get("users", [])
     dirty_sessions = db_manager.count_sessions(status="dirty")
     sessions_total = db_manager.count_sessions()
     active_sessions = db_manager.count_sessions(status="active")
-    cooldown_accounts = db_manager.count_accounts(status="cooldown")
-    expired_accounts = db_manager.count_accounts(status="expired")
-    available_accounts = db_manager.count_accounts(status="active") + db_manager.count_accounts(status="ready")
     with db_manager._get_connection() as conn:
         users_total = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"])
         active_users = int(conn.execute("SELECT COUNT(*) AS count FROM users WHERE status = 'active'").fetchone()["count"])
@@ -2176,16 +2048,10 @@ def _overview_summary() -> dict:
         "sessions_total": sessions_total,
         "active_sessions": active_sessions,
         "dirty_sessions": dirty_sessions,
-        "accounts_total": len(provider_rows),
-        "accounts_available": available_accounts,
-        "cooldown_accounts": cooldown_accounts,
-        "expired_accounts": expired_accounts,
         "users_total": users_total,
         "active_users": active_users,
         "active_keys": active_keys,
-        "providers_configured": len([provider for provider in ProviderType if any(row["provider"] == provider.value for row in provider_rows)]),
-        "total_requests_30d": sum(int(row.get("request_count") or 0) for row in user_rows),
-        "total_tokens_30d": sum(int(row.get("input_tokens") or 0) + int(row.get("output_tokens") or 0) for row in user_rows),
+        "providers_configured": len(ProviderType),
     }
 
 
@@ -2208,10 +2074,9 @@ def _health_components() -> dict:
         }
     )
     state_store_latency = _measure_component_latency(_state_store_ping)
-    dirty_sessions = db_manager.count_sessions(status="dirty")
     return {
         "gateway": {"status": "ok", "latency_ms": gateway_latency},
-        "orchestrator": {"status": "degraded" if dirty_sessions else "ok", "latency_ms": orchestrator_latency},
+        "orchestrator": {"status": "ok", "latency_ms": orchestrator_latency},
         "state_store": {"status": "ok", "latency_ms": state_store_latency},
     }
 
@@ -2314,7 +2179,6 @@ async def management_overview():
             "workspaces_root": settings.workspaces_root,
             "max_concurrency": settings.max_concurrency,
             "session_ttl_hours": settings.session_ttl_hours,
-            "codex_usage_endpoints": settings.codex_usage_endpoints.split(","),
         },
         "version": version_info,
     })
@@ -2328,19 +2192,10 @@ def _render_metrics() -> str:
         "# HELP uag_sessions_dirty Dirty sessions requiring intervention",
         "# TYPE uag_sessions_dirty gauge",
         f"uag_sessions_dirty {db_manager.count_sessions(status='dirty')}",
-        "# HELP uag_accounts_total Total registered accounts",
-        "# TYPE uag_accounts_total gauge",
-        f"uag_accounts_total {db_manager.count_accounts()}",
-        "# HELP uag_accounts_cooldown Accounts in cooldown",
-        "# TYPE uag_accounts_cooldown gauge",
-        f"uag_accounts_cooldown {db_manager.count_accounts(status='cooldown')}",
     ]
     for provider in ProviderType:
         lines.append(
             f'uag_provider_sessions{{provider="{provider.value}"}} {db_manager.count_sessions(provider=provider.value)}'
-        )
-        lines.append(
-            f'uag_provider_accounts{{provider="{provider.value}"}} {db_manager.count_accounts(provider=provider.value)}'
         )
     return "\n".join(lines) + "\n"
 
@@ -2366,13 +2221,25 @@ async def list_sessions(
     sessions = db_manager.get_all_sessions(
         status=status,
         provider=provider,
-        workspace_prefix=workspace,
+        workspace_id=workspace,
         after=after,
         limit=limit,
     )
     bindings = _session_binding_map([session.client_session_id for session in sessions])
     serialized = [_serialize_session(session, bindings.get(session.client_session_id)) for session in sessions]
     return envelope(serialized, meta=_page_meta(serialized, "client_session_id"))
+
+
+@management_router.get("/sessions/cli-runs", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List captured CLI runs")
+async def list_cli_runs(
+    session_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 25,
+):
+    runs = _cli_run_store().list_runs(session_id=session_id, provider=provider, status=status, limit=limit)
+    return envelope(runs)
+
 
 @management_router.get("/sessions/{session_id}", tags=[TAG_MANAGEMENT_SESSIONS], summary="Get a session")
 async def get_session(session_id: str):
@@ -2393,7 +2260,7 @@ async def terminate_session(session_id: str, current_operator: dict = Depends(ge
     if not session:
         raise HTTPException(404, "Session not found")
     db_manager.delete_session(session_id)
-    db_manager.record_audit(
+    emit_audit_event(
         f"operator:{current_operator['id']}",
         "session.terminated",
         "session",
@@ -2410,7 +2277,7 @@ async def reset_session(session_id: str, current_operator: dict = Depends(get_cu
     before = _serialize_session(session)
     session.status = SessionStatus.IDLE
     db_manager.save_session(session)
-    db_manager.record_audit(
+    emit_audit_event(
         f"operator:{current_operator['id']}",
         "session.reset",
         "session",
@@ -2420,413 +2287,327 @@ async def reset_session(session_id: str, current_operator: dict = Depends(get_cu
     )
     return envelope(_serialize_session(session))
 
-@management_router.get("/accounts", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="List accounts")
-async def list_accounts(
-    provider: Optional[str] = None,
-    status: Optional[str] = None,
-    after: Optional[str] = None,
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    accounts = db_manager.get_all_accounts(provider=provider, status=status, after=after, limit=limit)
-    session_counts = _account_session_count_map([account.account_id for account in accounts])
-    serialized = [_serialize_account(account, session_counts.get(account.account_id, 0)) for account in accounts]
-    return envelope(serialized, meta=_page_meta(serialized, "account_id"))
 
-
-@management_router.get("/accounts/{account_id}", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Get an account")
-async def get_account_detail(account_id: str):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    return envelope(_serialize_account(account))
-
-
-@management_router.post("/accounts/{account_id}/select", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Select an account as CLI-primary")
-async def select_cli_account(account_id: str, current_operator: dict = Depends(get_current_operator)):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    before = account.model_dump()
-    selected = db_manager.set_cli_primary_account(account_id)
-    if not selected:
-        raise HTTPException(404, "Account not found")
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="account.cli_selected",
-        target_type="account",
-        target_id=account_id,
-        before=before,
-        after=selected.model_dump(),
-    )
-    payload = _serialize_account(selected)
-    pool = AccountPool(db_manager)
-    activated_path = pool.activate_for_cli(account_id)
-    payload["activated_auth_path"] = activated_path
-    return envelope(payload)
-
-
-@management_router.post("/accounts/{account_id}/cooldown", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Force an account into cooldown")
-async def cooldown_account(account_id: str, current_operator: dict = Depends(get_current_operator)):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    before = _serialize_account(account)
-    AccountPool(db_manager).mark_cooldown(account_id)
-    updated = db_manager.get_account(account_id)
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="account.cooldown_forced",
-        target_type="account",
-        target_id=account_id,
-        before=before,
-        after=_serialize_account(updated),
-    )
-    return envelope(_serialize_account(updated))
-
-
-@management_router.post("/accounts/{account_id}/recover", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Recover an account from cooldown")
-async def recover_account(account_id: str, current_operator: dict = Depends(get_current_operator)):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    before = _serialize_account(account)
-    account.status = "ready"
-    account.cooldown_until = None
-    db_manager.save_account(account)
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="account.cooldown_released",
-        target_type="account",
-        target_id=account_id,
-        before=before,
-        after=_serialize_account(account),
-    )
-    return envelope(_serialize_account(account))
-
-@management_router.post("/accounts", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Register an account")
-async def add_account(account: Account):
-    raise HTTPException(
-        status_code=410,
-        detail="Deprecated endpoint. Use POST /management/v1/accounts/upload with credential_text or credential_file.",
-    )
-
-
-@management_router.post("/accounts/upload", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Upload an account credential")
-async def upload_account_credential(
-    provider: str = Form(...),
-    auth_type: str = Form(...),
-    label: str = Form(...),
-    account_id: Optional[str] = Form(None),
-    credential_text: Optional[str] = Form(None),
-    credential_file: Optional[UploadFile] = File(None),
-    current_operator: dict = Depends(get_current_operator),
-):
-    if not credential_text and not credential_file:
-        raise HTTPException(status_code=400, detail="credential_text or credential_file is required")
-    if credential_text and credential_file:
-        raise HTTPException(status_code=400, detail="Provide only one of credential_text or credential_file")
-
+def _to_ms(iso_str: Optional[str]) -> Optional[int]:
+    if not iso_str:
+        return None
     try:
-        provider_enum = ProviderType(provider.lower())
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}") from exc
+        if iso_str.endswith("Z"):
+            iso_str = f"{iso_str[:-1]}+00:00"
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except ValueError:
+        return None
 
-    if provider_enum != ProviderType.CODEX:
-        raise HTTPException(
-            status_code=400,
-            detail="Only Codex credentials can be uploaded. Gemini and OpenCode use the locally installed CLI login on this system.",
-        )
 
-    try:
-        auth_type_enum = AuthType(auth_type.upper())
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Unsupported auth_type: {auth_type}") from exc
-
-    raw = credential_text
-    if credential_file is not None:
-        body = await credential_file.read()
-        raw = body.decode("utf-8", errors="ignore")
-    if not raw or not raw.strip():
-        raise HTTPException(status_code=400, detail="Credential payload is empty")
-
-    resolved_account_id = account_id or f"{provider_enum.value}-{uuid4().hex[:8]}"
-    account = Account(
-        account_id=resolved_account_id,
-        provider=provider_enum,
-        auth_type=auth_type_enum,
-        label=label,
-    )
-    pool = AccountPool(db_manager)
-    existing = db_manager.get_account(resolved_account_id)
-    if existing:
-        before = existing.model_dump()
-        updated = pool.update_credential(resolved_account_id, raw)
-        if updated is None:
-            raise HTTPException(status_code=404, detail="Account not found")
-        updated.label = label or updated.label
-        updated.auth_type = auth_type_enum
-        db_manager.save_account(updated)
-        db_manager.record_audit(
-            actor=f"operator:{current_operator['id']}",
-            action="account.credential_updated",
-            target_type="account",
-            target_id=resolved_account_id,
-            before=before,
-            after=updated.model_dump(),
-        )
-        return envelope(_serialize_account(updated))
-
-    pool.register_account(account, raw)
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="account.registered",
-        target_type="account",
-        target_id=account.account_id,
-        after=account.model_dump(),
-    )
-    return envelope(_serialize_account(db_manager.get_account(account.account_id)))
-
-@management_router.delete("/accounts/{account_id}", tags=[TAG_MANAGEMENT_ACCOUNTS], summary="Delete an account")
-async def remove_account(account_id: str, current_operator: dict = Depends(get_current_operator)):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    db_manager.delete_account(account_id)
-    db_manager.record_audit(
-        f"operator:{current_operator['id']}",
-        "account.removed",
-        "account",
-        account_id,
-        before=_serialize_account(account),
-    )
-    return envelope()
-
-@management_router.get("/audit", tags=[TAG_MANAGEMENT_AUDIT], summary="List audit log entries")
+@management_router.get("/audit", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List audit logs")
 async def list_audit_logs(
-    limit: int = Query(default=50, ge=1, le=200),
-    after: Optional[int] = None,
+    limit: int = 25,
+    after: Optional[str] = None,
     actor: Optional[str] = None,
     action: Optional[str] = None,
     target_type: Optional[str] = None,
     search: Optional[str] = None,
 ):
-    logs = db_manager.get_audit_logs(
-        limit=limit,
-        after=after,
+    after_ts = None
+    if after:
+        try:
+            after_ts = int(after)
+        except ValueError:
+            pass
+    
+    logs = _get_audit_log_store().list_events(
+        limit=limit + 1,
+        after=after_ts,
         actor=actor,
         action=action,
         target_type=target_type,
         search=search,
     )
-    return envelope(logs, meta=_page_meta(logs, "timestamp"))
+    
+    cursor = None
+    if len(logs) > limit:
+        logs = logs[:limit]
+        cursor = str(logs[-1]["timestamp"])
+    
+    return envelope(logs, meta={"page": {"cursor": cursor, "total_count": None}})
 
 
-@management_router.get("/traces", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List trace roots")
+@management_router.get("/audit/stream", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Stream audit logs")
+async def stream_audit_logs(
+    limit: int = Query(default=50, le=100),
+    after: Optional[str] = None,
+):
+    after_ts = None
+    if after:
+        try:
+            after_ts = int(after)
+        except ValueError:
+            pass
+
+    initial = [e for e in AUDIT_EVENTS if after_ts is None or e["timestamp"] > after_ts]
+    if len(initial) > limit:
+        initial = initial[-limit:]
+
+    async def event_stream():
+        yield "event: init\ndata: " + json.dumps(initial) + "\n\n"
+
+        last_ts = initial[-1]["timestamp"] if initial else 0
+        while True:
+            await asyncio.sleep(1)
+            new_events = [e for e in AUDIT_EVENTS if e["timestamp"] > last_ts]
+            if new_events:
+                last_ts = new_events[-1]["timestamp"]
+                yield "event: update\ndata: " + json.dumps(new_events) + "\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@management_router.get("/observability/logs/stream", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Stream runtime logs")
+async def stream_runtime_logs(
+    limit: int = Query(default=100, le=200),
+    after: Optional[str] = None,
+):
+    after_ts = after
+    initial = [e for e in RUNTIME_LOGS if after_ts is None or str(e.get("timestamp", "")) > after_ts]
+    if len(initial) > limit:
+        initial = initial[-limit:]
+
+    async def event_stream():
+        yield "event: init\ndata: " + json.dumps(initial) + "\n\n"
+
+        last_ts = initial[-1].get("timestamp") if initial else ""
+        while True:
+            await asyncio.sleep(1)
+            new_logs = [e for e in RUNTIME_LOGS if str(e.get("timestamp", "")) > str(last_ts)]
+            if new_logs:
+                last_ts = new_logs[-1].get("timestamp")
+                yield "event: update\ndata: " + json.dumps(new_logs) + "\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@management_router.get("/observability/traces", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List traces")
 async def list_traces(
-    limit: int = Query(default=50, ge=1, le=200),
-    after: Optional[int] = None,
-    component: Optional[str] = None,
-    request_id: Optional[str] = None,
-    status: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    search: Optional[str] = None,
+    limit: int = 50,
+    after: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    search: Optional[str] = None,
 ):
-    since_ms = _parse_time_filter(since)
-    until_ms = _parse_time_filter(until)
-    rows = db_manager.list_traces(
+    traces = db_manager.list_traces(
         limit=limit,
         after=after,
-        component=component,
-        request_id=request_id,
-        status=status,
-        trace_id=trace_id,
+        since=_to_ms(since),
+        until=_to_ms(until),
         search=search,
-        since=since_ms,
-        until=until_ms,
     )
-    return envelope(rows, meta=_page_meta(rows, "started_at"))
+    return envelope(traces, meta=_page_meta(traces, "trace_id"))
 
 
-@management_router.get("/traces/{trace_id}", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get one trace")
+@management_router.get("/observability/traces/{trace_id}", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get a trace")
 async def get_trace(trace_id: str):
-    rows = db_manager.get_trace_events(trace_id)
-    if not rows:
+    trace = db_manager.get_trace(trace_id)
+    if not trace:
         raise HTTPException(404, "Trace not found")
-    return envelope({"trace_id": trace_id, "events": rows})
+    return envelope(trace)
 
 
-@management_router.get("/logs", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List runtime logs")
-async def list_runtime_logs(
-    limit: int = Query(default=50, ge=1, le=200),
+@management_router.get("/observability/logs", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List runtime logs")
+async def list_logs(
+    limit: int = 100,
     after: Optional[str] = None,
     level: Optional[str] = None,
-    component: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    request_id: Optional[str] = None,
     search: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
 ):
-    since_ms = _parse_time_filter(since)
-    until_ms = _parse_time_filter(until)
-    rows = _runtime_log_store().list_logs(
+    logs = db_manager.list_runtime_logs(
         limit=limit,
         after=after,
         level=level,
-        component=component,
-        trace_id=trace_id,
-        request_id=request_id,
         search=search,
-        since=since_ms,
-        until=until_ms,
+        since=_to_ms(since),
+        until=_to_ms(until),
     )
-    return envelope(rows, meta=_page_meta(rows, "timestamp"))
+    return envelope(logs, meta=_page_meta(logs, "timestamp"))
 
 
-@management_router.post("/observability/prune", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Prune old observability shards")
-async def prune_observability(current_operator: dict = Depends(get_current_operator)):
-    runtime_result = {"files_deleted": 0, "files_rewritten": 0, "records_deleted": 0}
-    if settings.log_retention_days > 0:
-        cutoff_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000) - settings.log_retention_days * 24 * 60 * 60 * 1000
-        runtime_result = _runtime_log_store().prune_older_than(cutoff_ms)
-    trace_result = db_manager.prune_traces(settings.telemetry_trace_retention_days)
-    payload = {
-        "runtime_logs": {
-            "retention_days": settings.log_retention_days,
-            **runtime_result,
-        },
-        "traces": {
-            "retention_days": settings.telemetry_trace_retention_days,
-            **trace_result,
-        },
-    }
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="observability.pruned",
-        target_type="observability",
-        target_id="file-shards",
-        after=payload,
-    )
-    return envelope(payload)
+async def _stream_file_tail(
+    *,
+    path: Path,
+    meta_path: Optional[Path] = None,
+    tail_bytes: int = 65536,
+    follow: bool = True,
+    poll_ms: int = 250,
+) -> AsyncIterator[bytes]:
+    if not path.exists():
+        return
+    # Batch file reads to reduce per-chunk overhead (especially on the dashboard UI).
+    max_chunk_bytes = 64 * 1024
+    try:
+        with path.open("rb") as handle:
+            if tail_bytes and tail_bytes > 0:
+                try:
+                    size = path.stat().st_size
+                    handle.seek(max(0, size - tail_bytes))
+                except OSError:
+                    pass
+            while True:
+                buffer = bytearray()
+                while len(buffer) < max_chunk_bytes:
+                    chunk = handle.read(min(4096, max_chunk_bytes - len(buffer)))
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+
+                if buffer:
+                    yield bytes(buffer)
+                    continue
+                if not follow:
+                    return
+                ended = False
+                if meta_path and meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        ended = bool(meta.get("ended_at"))
+                    except Exception:
+                        ended = False
+                if ended:
+                    return
+                await asyncio.sleep(max(0.05, poll_ms / 1000))
+    except FileNotFoundError:
+        return
 
 
-@management_router.get("/usage", tags=[TAG_MANAGEMENT_USAGE], summary="Get aggregated usage")
-async def get_usage():
-    summary = db_manager.get_usage_summary()
-    provider_rows = summary["providers"]
-    total_tokens = sum(row["usage_weekly"] or row["usage_hourly"] for row in provider_rows)
-    top_users = sorted(
-        [
-            {
-                **row,
-                "total_tokens": int(row.get("input_tokens") or 0) + int(row.get("output_tokens") or 0),
-            }
-            for row in summary["users"]
-        ],
-        key=lambda row: row["total_tokens"],
-        reverse=True,
-    )[:10]
-    return envelope({
-        **summary,
-        "top_users": top_users,
-        "summary": {
-            "total_accounts": len(provider_rows),
-            "total_tokens": total_tokens,
-            "active_sessions": sum(row["active_sessions"] for row in summary["provider_totals"]),
-        },
-    })
+@management_router.get(
+    "/sessions/{session_id}/cli-runs/{provider}/{run_id}",
+    tags=[TAG_MANAGEMENT_OBSERVABILITY],
+    summary="Get captured CLI run metadata",
+)
+async def get_cli_run_meta(session_id: str, provider: str, run_id: str):
+    meta_path = _cli_run_store().meta_path(provider=provider, session_id=session_id, run_id=run_id)
+    meta = _cli_run_store().read_meta(meta_path)
+    if meta is None:
+        raise HTTPException(404, "CLI run not found")
+    return envelope(meta)
 
 
-@management_router.get("/usage/timeseries", tags=[TAG_MANAGEMENT_USAGE], summary="Get usage timeseries")
-async def get_usage_timeseries(days: int = Query(default=30, ge=1, le=90)):
-    return envelope(db_manager.get_usage_timeseries(days=days))
+@management_router.get(
+    "/sessions/{session_id}/cli-runs/{provider}/{run_id}/{stream_name}",
+    tags=[TAG_MANAGEMENT_OBSERVABILITY],
+    summary="Get captured CLI run output (stdout/stderr)",
+)
+async def get_cli_run_output(
+    session_id: str,
+    provider: str,
+    run_id: str,
+    stream_name: str,
+    max_bytes: int = 1024 * 1024,
+    tail_bytes: int = 0,
+):
+    store = _cli_run_store()
+    if stream_name not in {"stdout", "stderr"}:
+        raise HTTPException(400, "stream_name must be stdout or stderr")
+    path = store.stdout_path(provider=provider, session_id=session_id, run_id=run_id) if stream_name == "stdout" else store.stderr_path(provider=provider, session_id=session_id, run_id=run_id)
+    if not path.exists():
+        raise HTTPException(404, "Output not found")
+    data: bytes
+    if tail_bytes and tail_bytes > 0:
+        try:
+            with path.open("rb") as handle:
+                try:
+                    size = path.stat().st_size
+                    handle.seek(max(0, size - int(tail_bytes)))
+                except OSError:
+                    pass
+                data = handle.read()
+        except FileNotFoundError:
+            raise HTTPException(404, "Output not found")
+    else:
+        data = path.read_bytes()
+        if max_bytes and len(data) > max_bytes:
+            data = data[-max_bytes:]
+    return PlainTextResponse(data.decode("utf-8", errors="replace"))
 
 
-@management_router.post("/usage/refresh", tags=[TAG_MANAGEMENT_USAGE], summary="Refresh account usage")
-async def refresh_usage(current_operator: dict = Depends(get_current_operator)):
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="usage.refresh.started",
-        target_type="usage",
-        target_id="all-accounts",
-        after={"status": "started"},
-    )
-    await usage_monitor.sync_all_accounts(max_concurrency=12)
-    summary = db_manager.get_usage_summary()
-    payload = {
-        "refreshed_at": datetime.now(timezone.utc).isoformat(),
-        "accounts": len(summary["providers"]),
-    }
-    db_manager.record_audit(
-        actor=f"operator:{current_operator['id']}",
-        action="usage.refresh.completed",
-        target_type="usage",
-        target_id="all-accounts",
-        after=payload,
-    )
-    return envelope(payload)
+@management_router.get(
+    "/sessions/{session_id}/cli-runs/{provider}/{run_id}/prompt",
+    tags=[TAG_MANAGEMENT_OBSERVABILITY],
+    summary="Get captured CLI run prompt",
+)
+async def get_cli_run_prompt(
+    session_id: str,
+    provider: str,
+    run_id: str,
+):
+    store = _cli_run_store()
+    path = store.prompt_path(provider=provider, session_id=session_id, run_id=run_id)
+    if not path.exists():
+        raise HTTPException(404, "Prompt not found")
+    return PlainTextResponse(path.read_text(encoding="utf-8"))
 
 
-@management_router.get("/usage/accounts/{account_id}", tags=[TAG_MANAGEMENT_USAGE], summary="Get usage for one account")
-async def get_account_usage(account_id: str):
-    account = db_manager.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    summary = db_manager.get_usage_summary()
-    account_data = next((item for item in summary["providers"] if item["account_id"] == account_id), None)
-    usage_observed = _account_has_usage_observation(account)
-    hourly_limit = account.hourly_limit if usage_observed else None
-    weekly_limit = account.weekly_limit if usage_observed else None
-    hourly_left = max(hourly_limit - account.usage_hourly, 0) if hourly_limit is not None else None
-    weekly_left = max(weekly_limit - account.usage_weekly, 0) if weekly_limit is not None else None
-    return envelope({
-        "account": account_data or {
-            "usage_observed": usage_observed,
-            "provider": account.provider.value,
-            "account_id": account.account_id,
-            "label": account.label,
-            "usage_tpm": account.usage_tpm,
-            "usage_rpd": account.usage_rpd,
-            "usage_hourly": account.usage_hourly,
-            "usage_weekly": account.usage_weekly,
-            "hourly_limit": hourly_limit,
-            "weekly_limit": weekly_limit,
-            "hourly_left": hourly_left,
-            "weekly_left": weekly_left,
-            "hourly_left_pct": round((hourly_left / hourly_limit) * 100, 2) if hourly_left is not None and hourly_limit else None,
-            "weekly_left_pct": round((weekly_left / weekly_limit) * 100, 2) if weekly_left is not None and weekly_limit else None,
-            "hourly_used_pct": account.hourly_used_pct,
-            "weekly_used_pct": account.weekly_used_pct,
-            "hourly_reset_after_seconds": account.hourly_reset_after_seconds,
-            "weekly_reset_after_seconds": account.weekly_reset_after_seconds,
-            "hourly_reset_at": account.hourly_reset_at.isoformat() if account.hourly_reset_at else None,
-            "weekly_reset_at": account.weekly_reset_at.isoformat() if account.weekly_reset_at else None,
-            "access_token_expires_at": account.access_token_expires_at.isoformat() if account.access_token_expires_at else None,
-            "usage_source": account.usage_source,
-            "plan_type": account.plan_type,
-            "rate_limit_allowed": account.rate_limit_allowed,
-            "rate_limit_reached": account.rate_limit_reached,
-            "credits_has_credits": account.credits_has_credits,
-            "credits_unlimited": account.credits_unlimited,
-            "credits_overage_limit_reached": account.credits_overage_limit_reached,
-            "approx_local_messages_min": account.approx_local_messages_min,
-            "approx_local_messages_max": account.approx_local_messages_max,
-            "approx_cloud_messages_min": account.approx_cloud_messages_min,
-            "approx_cloud_messages_max": account.approx_cloud_messages_max,
-            "compute_hours_left": account.remaining_compute_hours,
-            "remaining_compute_hours": account.remaining_compute_hours,
-            "compute_hours_pct": round((account.remaining_compute_hours / 5.0) * 100, 2) if account.remaining_compute_hours is not None else None,
-            "remaining_compute_hours_pct": round((account.remaining_compute_hours / 5.0) * 100, 2) if account.remaining_compute_hours is not None else None,
-        }
-    })
+@management_router.get(
+    "/sessions/{session_id}/cli-runs/{provider}/{run_id}/{stream_name}/stream",
+    tags=[TAG_MANAGEMENT_OBSERVABILITY],
+    summary="Stream captured CLI run output (stdout/stderr)",
+)
+async def stream_cli_run_output(
+    session_id: str,
+    provider: str,
+    run_id: str,
+    stream_name: str,
+    tail_bytes: int = 65536,
+    follow: bool = True,
+    poll_ms: int = 250,
+):
+    store = _cli_run_store()
+    if stream_name not in {"stdout", "stderr"}:
+        raise HTTPException(400, "stream_name must be stdout or stderr")
+    path = store.stdout_path(provider=provider, session_id=session_id, run_id=run_id) if stream_name == "stdout" else store.stderr_path(provider=provider, session_id=session_id, run_id=run_id)
+    meta_path = store.meta_path(provider=provider, session_id=session_id, run_id=run_id)
+    if not path.exists() and not meta_path.exists():
+        raise HTTPException(404, "CLI run not found")
+    if not follow:
+        return StreamingResponse(
+            _stream_file_tail(path=path, meta_path=meta_path, tail_bytes=tail_bytes, follow=follow, poll_ms=poll_ms),
+            media_type="text/plain; charset=utf-8",
+        )
+
+    stream_iter = await _file_tail_hub().subscribe(path=path, meta_path=meta_path, tail_bytes=tail_bytes, poll_ms=poll_ms)
+    return StreamingResponse(stream_iter, media_type="text/plain; charset=utf-8")
 
 
-@management_router.get("/usage/sessions/{session_id}", tags=[TAG_MANAGEMENT_USAGE], summary="Get usage for one session")
-async def get_session_usage(session_id: str):
-    turns = db_manager.get_session_turns(session_id)
-    return envelope(turns)
+@management_router.get("/traces/{trace_id}", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get a trace alias", include_in_schema=False)
+async def get_trace_alias(trace_id: str):
+    return await get_trace(trace_id)
+
+
+@management_router.get("/traces", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List traces alias", include_in_schema=False)
+async def list_traces_alias(
+    limit: int = 50,
+    after: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    return await list_traces(limit=limit, after=after, since=since, until=until, search=search)
+
+
+@management_router.get("/logs", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="List logs alias", include_in_schema=False)
+async def list_logs_alias(
+    limit: int = 100,
+    after: Optional[str] = None,
+    level: Optional[str] = None,
+    search: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+):
+    return await list_logs(limit=limit, after=after, level=level, search=search, since=since, until=until)
+
 
 app.include_router(auth_router)
 app.include_router(management_router)
@@ -2836,12 +2617,32 @@ app.include_router(channel_router)
 # --- Static Dashboard ---
 
 def _dashboard_dist_path() -> Path:
-    return Path(os.getcwd()) / "ui" / "dist"
+    # 1. Check current working directory
+    cwd_path = Path(os.getcwd()) / "ui" / "dist"
+    if (cwd_path / "index.html").exists():
+        return cwd_path
+        
+    # 2. Check relative to this file (development mode)
+    dev_path = Path(__file__).parent.parent.parent.parent / "ui" / "dist"
+    if (dev_path / "index.html").exists():
+        return dev_path
+        
+    # 3. Check /app/ui/dist (Docker production mode)
+    docker_path = Path("/app/ui/dist")
+    if (docker_path / "index.html").exists():
+        return docker_path
+        
+    return cwd_path
 
 
 def _safe_dashboard_file(dashboard_path: str) -> Optional[Path]:
     dist_path = _dashboard_dist_path().resolve()
-    candidate = (dist_path / dashboard_path).resolve()
+    # Remove leading slash and dashboard prefix if present
+    clean_path = dashboard_path.lstrip("/")
+    if clean_path.startswith("dashboard/"):
+        clean_path = clean_path[len("dashboard/"):]
+    
+    candidate = (dist_path / clean_path).resolve()
     if candidate != dist_path and dist_path not in candidate.parents:
         return None
     if candidate.is_file():
@@ -2854,26 +2655,37 @@ def _is_dashboard_asset_path(dashboard_path: str) -> bool:
     return normalized.startswith("assets/") or bool(Path(normalized).suffix)
 
 
-def _dashboard_index_file() -> Path:
-    return _dashboard_dist_path() / "index.html"
-
-
 def _dashboard_response(dashboard_path: str = ""):
-    index_file = _dashboard_index_file()
+    dist_path = _dashboard_dist_path()
+    index_file = dist_path / "index.html"
+    
     if not index_file.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Dashboard build not found. Run `cd ui && npm run build` or start `codara serve --build-ui`.",
+        return PlainTextResponse(
+            "Dashboard assets not found. Please run `npm run build` in the ui directory.",
+            status_code=404
         )
 
     if dashboard_path:
+        # Check if it's a direct file in dist (e.g. favicon.svg, or an asset)
         static_file = _safe_dashboard_file(dashboard_path)
         if static_file:
+            # Let FastAPI/Starlette handle MIME types automatically
             return FileResponse(static_file)
+        
+        # If it looks like an asset but wasn't found, return 404
         if _is_dashboard_asset_path(dashboard_path):
-            raise HTTPException(status_code=404, detail="Dashboard asset not found")
+             raise HTTPException(status_code=404, detail="Dashboard asset not found")
 
+    # Fallback to index.html for SPA routing
     return FileResponse(index_file)
+
+
+# (Optional) We can still keep the mount for performance in production, 
+# but _dashboard_response now handles the logic for tests and dynamic paths.
+def setup_dashboard(app: FastAPI):
+    dist_root = _dashboard_dist_path()
+    if (dist_root / "assets").exists():
+        app.mount("/dashboard/assets", StaticFiles(directory=str(dist_root / "assets")), name="dashboard-assets")
 
 
 @app.get("/dashboard", include_in_schema=False)
@@ -2883,8 +2695,10 @@ async def dashboard_root():
 
 @app.get("/dashboard/{dashboard_path:path}", include_in_schema=False)
 async def dashboard_spa(dashboard_path: str):
+    # This catch-all handles both sub-files and SPA routes
     return _dashboard_response(dashboard_path)
 
+
 @app.get("/", include_in_schema=False)
-async def root_redirect():
-    return RedirectResponse(url="/dashboard")
+async def root_dashboard():
+    return _dashboard_response()

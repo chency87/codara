@@ -175,6 +175,24 @@ class InferenceService:
                 user.workspace_path,
                 options.workspace_id,
             )
+            
+            # Ensure workspace exists in DB
+            db_workspace = self.db.get_workspace_v2(workspace_id)
+            if not db_workspace:
+                from codara.core.models import Workspace
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                db_workspace = Workspace(
+                    workspace_id=workspace_id,
+                    name=workspace_id,
+                    path=workspace_root,
+                    user_id=user.user_id,
+                    template="empty",
+                    created_at=now,
+                    updated_at=now,
+                )
+                self.db.save_workspace(db_workspace)
+
             options.workspace_root = workspace_root
             options.workspace_id = workspace_id
             options.user_id = user.user_id
@@ -207,5 +225,6 @@ class InferenceService:
                 options,
                 messages,
                 provider_model=provider_model,
+                workspace_id=workspace_id,
             )
             return result, workspace_root, workspace_id, materialized

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -12,6 +13,13 @@ from codara.telemetry import current_trace_context, serialize_log_record
 
 _MANAGED_HANDLER_ATTR = "_codara_managed"
 _CONFIGURED_LOG_PATH: Optional[Path] = None
+_APP_LOGGER_NAME = "codara"
+_runtime_log_emitter: Optional[callable] = None
+
+
+def register_runtime_log_emitter(emitter: callable) -> None:
+    global _runtime_log_emitter
+    _runtime_log_emitter = emitter
 
 
 class TraceContextFilter(logging.Filter):
@@ -48,8 +56,16 @@ class DatetimeShardedFileHandler(logging.Handler):
                 self._switch_stream(path)
             if self._stream is None:
                 return
-            self._stream.write(self.format(record) + "\n")
+            formatted = self.format(record)
+            self._stream.write(formatted + "\n")
             self._stream.flush()
+            
+            if _runtime_log_emitter:
+                try:
+                    log_data = json.loads(formatted)
+                    _runtime_log_emitter(log_data)
+                except Exception:
+                    pass
         except Exception:
             self.handleError(record)
 
@@ -84,13 +100,13 @@ def configure_logging(current_settings: Optional[Settings] = None, *, force: boo
     log_path = runtime_root.resolve()
 
     global _CONFIGURED_LOG_PATH
-    root_logger = logging.getLogger()
+    app_logger = logging.getLogger(_APP_LOGGER_NAME)
     if not force and _CONFIGURED_LOG_PATH == log_path and any(
-        getattr(handler, _MANAGED_HANDLER_ATTR, False) for handler in root_logger.handlers
+        getattr(handler, _MANAGED_HANDLER_ATTR, False) for handler in app_logger.handlers
     ):
         return log_path
 
-    _remove_managed_handlers(root_logger)
+    _remove_managed_handlers(app_logger)
 
     level = logging.DEBUG if settings.debug else logging.INFO
     formatter: logging.Formatter
@@ -126,31 +142,40 @@ def configure_logging(current_settings: Optional[Settings] = None, *, force: boo
     stream_handler.addFilter(trace_filter)
     setattr(stream_handler, _MANAGED_HANDLER_ATTR, True)
 
-    root_logger.setLevel(level)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(stream_handler)
+    app_logger.setLevel(level)
+    app_logger.addHandler(file_handler)
+    app_logger.addHandler(stream_handler)
+    app_logger.propagate = False
 
-    for logger_name in ("codara", "uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
-        logger = logging.getLogger(logger_name)
-        logger.setLevel(level)
-        logger.handlers = []
-        logger.propagate = True
+    # Leave framework loggers alone by default. Optionally adjust their verbosity (levels only).
+    framework_level = getattr(settings, "framework_log_level", None)
+    if isinstance(framework_level, str) and framework_level.strip():
+        token = framework_level.strip()
+        resolved_level = getattr(logging, token.upper(), None)
+        if not isinstance(resolved_level, int):
+            try:
+                resolved_level = int(token)
+            except ValueError:
+                resolved_level = None
+        if isinstance(resolved_level, int):
+            for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+                logging.getLogger(logger_name).setLevel(resolved_level)
 
-    logging.captureWarnings(True)
+    logging.captureWarnings(False)
     _CONFIGURED_LOG_PATH = log_path
     retention_days = int(getattr(settings, "log_retention_days", 0) or 0)
     if settings.telemetry_json_logs and settings.log_persistence_backend == "datetime_file" and retention_days > 0:
         cutoff_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000) - retention_days * 24 * 60 * 60 * 1000
         RuntimeLogStore(str(log_path)).prune_older_than(cutoff_ms)
-    root_logger.info("Centralized logging initialized at %s", log_path)
+    app_logger.info("Codara logging initialized at %s", log_path)
     return log_path
 
 
-def _remove_managed_handlers(root_logger: logging.Logger) -> None:
-    for handler in list(root_logger.handlers):
+def _remove_managed_handlers(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
         if not getattr(handler, _MANAGED_HANDLER_ATTR, False):
             continue
-        root_logger.removeHandler(handler)
+        target_logger.removeHandler(handler)
         try:
             handler.close()
         except Exception:

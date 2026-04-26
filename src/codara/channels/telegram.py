@@ -23,14 +23,15 @@ DEFAULT_TELEGRAM_COMMANDS = [
     {"command": "commands", "description": "List the bot commands"},
     {"command": "link", "description": "Link this Telegram account to Codara"},
     {"command": "whoami", "description": "Show your linked Codara identity"},
+    {"command": "workspaces", "description": "List your Codara workspaces"},
     {"command": "workspace", "description": "Select the active workspace"},
-    {"command": "projects", "description": "List your Codara projects"},
-    {"command": "project", "description": "Select a project workspace"},
-    {"command": "project_create", "description": "Create a project workspace"},
-    {"command": "project_info", "description": "Show project details"},
+    {"command": "workspace_create", "description": "Create a workspace"},
+    {"command": "workspace_info", "description": "Show workspace details"},
     {"command": "provider", "description": "Select the active provider"},
     {"command": "status", "description": "Show current workspace and session"},
     {"command": "session", "description": "Show current runtime session status"},
+    {"command": "commit", "description": "Commit changes in the active workspace"},
+    {"command": "git", "description": "Run a git command in the active workspace"},
     {"command": "reset", "description": "Reset the current conversation session"},
 ]
 
@@ -149,11 +150,13 @@ class TelegramChannelAdapter:
             chunks[-1] = (chunks[-1][: TELEGRAM_TEXT_CHUNK_LIMIT - len(notice)]).rstrip() + notice
         return chunks
 
-    def send_text(self, chat_id: str, text: str, *, thread_id: str | None = None) -> list[dict[str, Any]]:
+    def send_text(self, chat_id: str, text: str, *, thread_id: str | None = None, parse_mode: str | None = None) -> list[dict[str, Any]]:
         chunks = self._split_text_chunks(text)
         responses: list[dict[str, Any]] = []
         for index, chunk in enumerate(chunks, start=1):
             payload: dict[str, Any] = {"chat_id": chat_id, "text": chunk, **self._thread_payload(thread_id)}
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
             try:
                 response = self._post_json("sendMessage", payload)
             except Exception as exc:
@@ -187,12 +190,14 @@ class TelegramChannelAdapter:
             )
         return responses
 
-    def edit_text(self, chat_id: str, message_id: int, text: str) -> dict[str, Any]:
+    def edit_text(self, chat_id: str, message_id: int, text: str, *, parse_mode: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text[:TELEGRAM_TEXT_CHUNK_LIMIT],
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         response = self._post_json("editMessageText", payload)
         record_event(
             "telegram.message.edited",
@@ -293,15 +298,19 @@ class TelegramChannelAdapter:
         return f"@{username.lower()}" not in lowered
 
     def _render_turn_reply(self, result) -> str:
-        lines = [result.text]
+        import html
+        output = f"<pre>{html.escape(result.text)}</pre>"
+        
+        lines = []
         if result.modified_files:
             lines.append("")
-            lines.append("Modified files:")
-            lines.extend(f"- {path}" for path in result.modified_files[:10])
+            lines.append("<b>Modified files:</b>")
+            lines.extend(f"<code>- {html.escape(path)}</code>" for path in result.modified_files[:10])
         elif not result.diff:
             lines.append("")
-            lines.append("No workspace file changes were detected for this turn.")
-        return "\n".join(lines).strip()
+            lines.append("<i>No workspace file changes were detected for this turn.</i>")
+            
+        return (output + "\n" + "\n".join(lines)).strip()
 
     def _message_id_from_send_results(self, results: Any) -> Optional[int]:
         if not isinstance(results, list) or not results:
@@ -324,11 +333,12 @@ class TelegramChannelAdapter:
         elapsed_seconds: Optional[float] = None,
         modified_file_count: Optional[int] = None,
     ) -> str:
+        import html
         lines = [
-            "Codara workspace turn",
-            f"Status: {stage}",
-            f"Workspace: {workspace_id}",
-            f"Provider: {provider}",
+            "<b>Terminal: Activity</b>",
+            f"Status: <code>{html.escape(stage)}</code>",
+            f"Workspace: <code>{html.escape(workspace_id)}</code>",
+            f"Provider: <code>{html.escape(provider)}</code>",
         ]
         if elapsed_seconds is not None:
             lines.append(f"Elapsed: {int(elapsed_seconds)}s")
@@ -337,8 +347,9 @@ class TelegramChannelAdapter:
         return "\n".join(lines)
 
     def _render_turn_error(self, exc: Exception) -> str:
+        import html
         detail = str(exc).strip() or type(exc).__name__
-        return f"Codara turn failed: {detail[:1200]}"
+        return f"<b>Terminal: Error</b>\n<pre>{html.escape(detail[:1200])}</pre>"
 
     def _send_turn_status_message(self, chat_id: str, conversation: dict, *, thread_id: str | None = None) -> Optional[int]:
         text = self._render_turn_status(
@@ -348,7 +359,7 @@ class TelegramChannelAdapter:
             elapsed_seconds=0,
         )
         try:
-            return self._message_id_from_send_results(self.send_text(chat_id, text, thread_id=thread_id))
+            return self._message_id_from_send_results(self.send_text(chat_id, text, thread_id=thread_id, parse_mode="HTML"))
         except Exception:
             logger.debug("Telegram turn status message send failed", exc_info=True)
             record_event(
@@ -380,7 +391,7 @@ class TelegramChannelAdapter:
             modified_file_count=modified_file_count,
         )
         try:
-            await asyncio.to_thread(self.edit_text, chat_id, message_id, text)
+            await asyncio.to_thread(self.edit_text, chat_id, message_id, text, parse_mode="HTML")
         except Exception as exc:
             logger.debug("Telegram turn status update failed", exc_info=True)
             record_event(
@@ -428,115 +439,107 @@ class TelegramChannelAdapter:
 
     def _render_help_text(self, *, linked: bool) -> str:
         lines = [
-            "Codara Telegram Bot",
+            "<b>Codara Telegram Bot</b>",
             "",
-            "How to use it:",
-            "1. Link your Telegram account with /link <token>",
-            "2. Pick a workspace with /workspace <workspace_id>",
-            "3. Pick a provider with /provider <codex|gemini|opencode>",
-            "4. Send a normal text message to run a turn in that workspace",
+            "<b>How to use it:</b>",
+            "1. Link your account with <code>/link &lt;token&gt;</code>",
+            "2. Pick a workspace with <code>/workspace &lt;id&gt;</code>",
+            "3. Pick a provider with <code>/provider &lt;name&gt;</code>",
+            "4. Send a message to execute an agent turn",
             "",
-            "Commands:",
+            "<b>Core Commands:</b>",
             "/start - quick introduction",
             "/help - full usage guide",
-            "/commands - list commands",
-            "/whoami - show your linked Codara identity",
-            "/projects - list your project workspaces",
-            "/project <name> - switch to an existing project",
-            "/project_create <name> [default|python|docs|empty] - create and switch to a project",
-            "/project_info <name> - show project details",
-            "/status - show current workspace, provider, and session",
-            "/session - show current runtime session status",
-            "/reset - reset the current conversation session",
+            "/commands - list all commands",
+            "/whoami - show linked identity",
+            "/workspaces - list workspaces",
+            "/workspace &lt;id&gt; - switch workspace",
+            "/workspace_create &lt;name&gt; - create new workspace",
+            "/commit &lt;message&gt; - git commit changes",
+            "/git &lt;args...&gt; - run git command",
+            "/status - show current session status",
         ]
-        if linked:
-            lines.extend(
-                [
-                    "/workspace <id> - switch workspace",
-                    "/provider <name> - switch provider",
-                ]
-            )
-        else:
-            lines.append("/link <token> - link this Telegram account")
+        if not linked:
+            lines.append("")
+            lines.append("<code>/link &lt;token&gt;</code> - link this Telegram account")
         return "\n".join(lines)
 
-    def _render_projects_text(self, projects: list[dict[str, Any]]) -> str:
-        if not projects:
-            return "No Codara projects found. Create one with /project_create <name>."
-        lines = ["Your Codara projects:"]
-        for record in projects[:20]:
-            metadata = record.get("project") or {}
-            name = metadata.get("name") or record.get("name")
-            template = metadata.get("template") or "unknown"
-            relative = record.get("relative_path") or name
-            lines.append(f"- {name} ({template}) -> /project {relative}")
-        if len(projects) > 20:
-            lines.append(f"...and {len(projects) - 20} more.")
+    def _render_workspaces_text(self, records: list[dict[str, Any]]) -> str:
+        import html
+        if not records:
+            return "No workspaces found. Create one with /workspace_create <name>."
+        lines = ["<b>Your Workspaces:</b>"]
+        for record in records[:20]:
+            name = record.get("name")
+            workspace_id = record.get("workspace_id")
+            template = record.get("template")
+            lines.append(f"- <code>{html.escape(name)}</code> ({html.escape(template)}) -&gt; <code>/workspace {html.escape(workspace_id)}</code>")
+        if len(records) > 20:
+            lines.append(f"...and {len(records) - 20} more.")
         return "\n".join(lines)
 
-    def _render_project_info_text(self, record: dict[str, Any]) -> str:
-        metadata = record.get("project") or {}
+    def _render_workspace_info_text(self, record: dict[str, Any]) -> str:
+        import html
         lines = [
-            f"Project: {metadata.get('name') or record.get('name')}",
-            f"Template: {metadata.get('template') or 'unknown'}",
-            f"Workspace: {record.get('relative_path') or record.get('name')}",
-            f"Path: {record.get('path')}",
-            f"Default provider: {metadata.get('default_provider') or 'n/a'}",
-            f"Git repo: {'yes' if record.get('git', {}).get('is_git_repo') else 'no'}",
-            f"Bound sessions: {len(record.get('sessions') or [])}",
+            "<b>Terminal: Workspace Info</b>",
+            f"Workspace: <code>{html.escape(record.get('name', ''))}</code>",
+            f"ID: <code>{html.escape(record.get('workspace_id', ''))}</code>",
+            f"Template: <code>{html.escape(record.get('template', ''))}</code>",
+            f"Provider: <code>{html.escape(record.get('default_provider') or 'n/a')}</code>",
         ]
-        if metadata.get("created_at"):
-            lines.append(f"Created at: {metadata['created_at']}")
+        if record.get("created_at"):
+            lines.append(f"Created at: <code>{html.escape(str(record['created_at']))}</code>")
         return "\n".join(lines)
 
     def _render_commands_text(self) -> str:
-        lines = ["Available commands:"]
+        lines = ["<b>Available commands:</b>"]
         for item in DEFAULT_TELEGRAM_COMMANDS:
-            lines.append(f"/{item['command']} - {item['description']}")
+            lines.append(f"/<code>{item['command']}</code> - {item['description']}")
         return "\n".join(lines)
 
     def _render_whoami_text(self, user: Any, conversation: Optional[dict] = None) -> str:
+        import html
         lines = [
-            f"User ID: {user.user_id}",
-            f"Name: {user.display_name}",
-            f"Email: {user.email}",
+            "<b>Terminal: Identity</b>",
+            f"User ID: <code>{html.escape(user.user_id)}</code>",
+            f"Name: <code>{html.escape(user.display_name)}</code>",
+            f"Email: <code>{html.escape(user.email)}</code>",
         ]
         if conversation:
             lines.extend(
                 [
-                    f"Workspace: {conversation['workspace_id']}",
-                    f"Provider: {conversation['provider']}",
-                    f"Session: {conversation['session_label']}",
+                    f"Active Workspace: <code>{html.escape(conversation['workspace_id'])}</code>",
+                    f"Default Provider: <code>{html.escape(conversation['provider'])}</code>",
+                    f"Session Label: <code>{html.escape(conversation['session_label'])}</code>",
                 ]
             )
         return "\n".join(lines)
 
     def _render_status_text(self, conversation: dict) -> str:
+        import html
         runtime = self.channel_service.get_conversation_session_status(conversation)
         lines = [
-            f"Workspace: {conversation['workspace_id']}",
-            f"Provider: {conversation['provider']}",
-            f"Session: {conversation['session_label']}",
+            "<b>Terminal: Status</b>",
+            f"Workspace: <code>{html.escape(conversation['workspace_id'])}</code>",
+            f"Provider: <code>{html.escape(conversation['provider'])}</code>",
+            f"Session: <code>{html.escape(conversation['session_label'])}</code>",
             "",
-            "Runtime:",
-            f"Status: {runtime['status']}",
-            f"Client session: {runtime['client_session_id']}",
+            "<b>Runtime:</b>",
+            f"Status: <code>{html.escape(runtime['status'])}</code>",
+            f"Client session: <code>{html.escape(runtime['client_session_id'])}</code>",
         ]
         if runtime.get("backend_id"):
-            lines.append(f"Provider session: {runtime['backend_id']}")
-        if runtime.get("account_id"):
-            lines.append(f"Account: {runtime['account_id']}")
-        if runtime.get("cwd_path"):
-            lines.append(f"Workspace path: {runtime['cwd_path']}")
-        if runtime.get("last_context_tokens") is not None:
-            lines.append(f"Last context tokens: {runtime['last_context_tokens']}")
+            lines.append(f"Provider session: <code>{html.escape(runtime['backend_id'])}</code>")
+        if runtime.get("workspace_id"):
+            lines.append(f"Workspace ID: <code>{html.escape(runtime['workspace_id'])}</code>")
         if runtime.get("updated_at"):
-            lines.append(f"Updated at: {runtime['updated_at']}")
+            lines.append(f"Updated at: <code>{html.escape(runtime['updated_at'])}</code>")
         if not runtime["exists"]:
-            lines.append("No provider turn has started for this conversation yet.")
+            lines.append("<i>No provider turn has started for this conversation yet.</i>")
         return "\n".join(lines)
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
+        import html
         async with start_span(
             "telegram.handle_update",
             component="channel.telegram",
@@ -586,18 +589,43 @@ class TelegramChannelAdapter:
             if text.startswith("/link "):
                 token = text.split(" ", 1)[1].strip()
                 try:
-                    self.channel_service.link_external_user(
+                    link_record = self.channel_service.link_external_user(
                         channel=self.channel,
                         bot_name=self.bot_name,
                         raw_token=token,
                         external_user_id=external_user_id,
                         external_chat_id=chat_id,
                     )
+                    user_id = link_record["user_id"]
+                    
+                    # Ensure 'default' workspace exists and select it
+                    try:
+                        workspaces = self.channel_service.list_user_workspaces(user_id)
+                        if not any(w["name"] == "default" for w in workspaces):
+                            self.channel_service.create_user_workspace(
+                                user_id=user_id,
+                                name="default",
+                                template="default",
+                            )
+                        
+                        conversation = self.channel_service.get_or_create_conversation(
+                            channel=self.channel,
+                            bot_name=self.bot_name,
+                            conversation_key=conversation_key,
+                            user_id=user_id,
+                            external_chat_id=chat_id,
+                            external_thread_id=thread_token,
+                        )
+                        self.channel_service.update_conversation_workspace(conversation, "default")
+                        self.send_text(chat_id, "<b>Successfully linked!</b> Active workspace set to <code>default</code>.", thread_id=thread_token, parse_mode="HTML")
+                    except Exception as exc:
+                        logger.warning("Failed to auto-provision default workspace for linked user %s: %s", user_id, exc)
+                        self.send_text(chat_id, "<b>Linked!</b> Use <code>/workspace_create</code> to start.", thread_id=thread_token, parse_mode="HTML")
+                    
+                    return handled("linked")
                 except HTTPException as exc:
-                    self.send_text(chat_id, str(exc.detail), thread_id=thread_token)
+                    self.send_text(chat_id, f"Link failed: <code>{html.escape(str(exc.detail))}</code>", thread_id=thread_token, parse_mode="HTML")
                     return handled("link-error")
-                self.send_text(chat_id, "Telegram account linked to Codara.", thread_id=thread_token)
-                return handled("linked")
 
             if text in {"/start", "/help"}:
                 link = self.channel_service.get_bound_user(
@@ -605,16 +633,16 @@ class TelegramChannelAdapter:
                     bot_name=self.bot_name,
                     external_user_id=external_user_id,
                 )
-                self.send_text(chat_id, self._render_help_text(linked=bool(link)), thread_id=thread_token)
+                self.send_text(chat_id, self._render_help_text(linked=bool(link)), thread_id=thread_token, parse_mode="HTML")
                 return handled("help")
 
             if text == "/commands":
-                self.send_text(chat_id, self._render_commands_text(), thread_id=thread_token)
+                self.send_text(chat_id, self._render_commands_text(), thread_id=thread_token, parse_mode="HTML")
                 return handled("commands")
 
             user = self.channel_service.get_bound_user(channel=self.channel, bot_name=self.bot_name, external_user_id=external_user_id)
             if not user:
-                self.send_text(chat_id, "This Telegram account is not linked. Use /link <token> first.", thread_id=thread_token)
+                self.send_text(chat_id, "This Telegram account is not linked. Use <code>/link &lt;token&gt;</code> first.", thread_id=thread_token, parse_mode="HTML")
                 return handled("not-linked")
 
             conversation = self.channel_service.get_or_create_conversation(
@@ -626,95 +654,130 @@ class TelegramChannelAdapter:
                 external_thread_id=thread_token,
             )
 
-            if text.startswith("/workspace "):
-                workspace_id = text.split(" ", 1)[1].strip()
-                try:
-                    updated = self.channel_service.update_conversation_workspace(conversation, workspace_id)
-                except HTTPException as exc:
-                    self.send_text(chat_id, f"Workspace change failed: {exc.detail}", thread_id=thread_token)
-                    return handled("workspace-error")
-                self.send_text(chat_id, f"Workspace set to {updated['workspace_id']}.", thread_id=thread_token)
-                return handled("workspace-set", workspace_id=updated["workspace_id"])
+            if text == "/workspaces":
+                workspaces = self.channel_service.list_user_workspaces(user.user_id)
+                self.send_text(chat_id, self._render_workspaces_text(workspaces), thread_id=thread_token, parse_mode="HTML")
+                return handled("workspaces")
 
-            if text == "/projects":
-                projects = self.channel_service.list_user_projects(user.user_id)
-                self.send_text(chat_id, self._render_projects_text(projects), thread_id=thread_token)
-                return handled("projects")
-
-            if text.startswith("/project_create "):
+            if text.startswith("/workspace_create "):
                 parts = text.split()
                 if len(parts) < 2:
-                    self.send_text(chat_id, "Usage: /project_create <name> [default|python|docs|empty]", thread_id=thread_token)
-                    return handled("project-create-error")
+                    self.send_text(chat_id, "Usage: <code>/workspace_create &lt;name&gt; [default|python|docs|empty]</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-create-error")
                 name = parts[1]
                 template = parts[2].lower() if len(parts) >= 3 else "default"
                 try:
-                    result = self.channel_service.create_user_project(
+                    result = self.channel_service.create_user_workspace(
                         user_id=user.user_id,
                         name=name,
                         template=template,
                         default_provider=conversation["provider"],
                     )
-                    updated = self.channel_service.update_conversation_workspace(conversation, result["relative_path"])
+                    updated = self.channel_service.update_conversation_workspace(conversation, result["workspace_id"])
                     conversation = updated
                 except HTTPException as exc:
-                    self.send_text(chat_id, f"Project creation failed: {exc.detail}", thread_id=thread_token)
-                    return handled("project-create-error")
+                    self.send_text(chat_id, f"Workspace creation failed: <code>{html.escape(str(exc.detail))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-create-error")
                 except Exception as exc:
-                    self.send_text(chat_id, f"Project creation failed: {exc}", thread_id=thread_token)
-                    return handled("project-create-error")
+                    self.send_text(chat_id, f"Workspace creation failed: <code>{html.escape(str(exc))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-create-error")
                 self.send_text(
                     chat_id,
-                    f"Project created: {result['name']}\nWorkspace set to {updated['workspace_id']}.\nTemplate: {result['template']}",
+                    f"<b>Workspace Created</b>\nName: <code>{html.escape(result['name'])}</code>\nID: <code>{html.escape(updated['workspace_id'])}</code>\nTemplate: <code>{html.escape(result['template'])}</code>",
                     thread_id=thread_token,
+                    parse_mode="HTML",
                 )
-                return handled("project-created", workspace_id=updated["workspace_id"])
+                return handled("workspace-created", workspace_id=updated["workspace_id"])
 
-            if text.startswith("/project_info "):
-                name = text.split(" ", 1)[1].strip()
+            if text.startswith("/workspace_info "):
+                workspace_id = text.split(" ", 1)[1].strip()
                 try:
-                    record = self.channel_service.get_user_project(user.user_id, name)
+                    record = self.channel_service.get_user_workspace(user.user_id, workspace_id)
                 except HTTPException as exc:
-                    self.send_text(chat_id, f"Project lookup failed: {exc.detail}", thread_id=thread_token)
-                    return handled("project-info-error")
+                    self.send_text(chat_id, f"Workspace lookup failed: <code>{html.escape(str(exc.detail))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-info-error")
                 if not record:
-                    self.send_text(chat_id, f"Project not found: {name}", thread_id=thread_token)
-                    return handled("project-info-missing")
-                self.send_text(chat_id, self._render_project_info_text(record), thread_id=thread_token)
-                return handled("project-info")
+                    self.send_text(chat_id, f"Workspace not found: <code>{html.escape(workspace_id)}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-info-missing")
+                self.send_text(chat_id, self._render_workspace_info_text(record), thread_id=thread_token, parse_mode="HTML")
+                return handled("workspace-info")
 
-            if text.startswith("/project "):
-                name = text.split(" ", 1)[1].strip()
+            if text.startswith("/workspace "):
+                workspace_id = text.split(" ", 1)[1].strip()
                 try:
-                    record = self.channel_service.get_user_project(user.user_id, name)
-                    if not record:
-                        self.send_text(chat_id, f"Project not found: {name}", thread_id=thread_token)
-                        return handled("project-missing")
-                    workspace_id = record.get("relative_path") or record.get("name") or name
                     updated = self.channel_service.update_conversation_workspace(conversation, workspace_id)
                 except HTTPException as exc:
-                    self.send_text(chat_id, f"Project switch failed: {exc.detail}", thread_id=thread_token)
-                    return handled("project-error")
-                self.send_text(chat_id, f"Project set to {updated['workspace_id']}.", thread_id=thread_token)
-                return handled("project-set", workspace_id=updated["workspace_id"])
+                    self.send_text(chat_id, f"Workspace change failed: <code>{html.escape(str(exc.detail))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("workspace-error")
+                self.send_text(chat_id, f"Active workspace set to <code>{html.escape(updated['workspace_id'])}</code>.", thread_id=thread_token, parse_mode="HTML")
+                return handled("workspace-set", workspace_id=updated["workspace_id"])
 
             if text.startswith("/provider "):
                 provider = text.split(" ", 1)[1].strip().lower()
                 try:
                     updated = self.channel_service.update_conversation_provider(conversation, provider)
                 except Exception:
-                    self.send_text(chat_id, "Unsupported provider.", thread_id=thread_token)
+                    self.send_text(chat_id, "<b>Error:</b> Unsupported provider.", thread_id=thread_token, parse_mode="HTML")
                     return handled("provider-error")
-                self.send_text(chat_id, f"Provider set to {updated['provider']}.", thread_id=thread_token)
+                self.send_text(chat_id, f"Provider set to <code>{html.escape(updated['provider'])}</code>.", thread_id=thread_token, parse_mode="HTML")
                 return handled("provider-set", provider=updated["provider"])
+
+            if text.startswith("/commit "):
+                message = text.split(" ", 1)[1].strip()
+                if not message:
+                    self.send_text(chat_id, "Usage: <code>/commit &lt;message&gt;</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("commit-error")
+                try:
+                    result = self.channel_service.commit_workspace_changes(
+                        user.user_id,
+                        conversation["workspace_id"],
+                        message,
+                    )
+                    import html
+                    terminal_out = (
+                        f"<b>Terminal: Git Commit</b>\n"
+                        f"<code>$ git add -A && git commit -m \"{html.escape(message)}\"</code>\n\n"
+                        f"<pre>{html.escape(result)}</pre>"
+                    )
+                    self.send_text(chat_id, terminal_out, thread_id=thread_token, parse_mode="HTML")
+                    return handled("commit-success", workspace_id=conversation["workspace_id"])
+                except Exception as exc:
+                    self.send_text(chat_id, f"<b>Commit failed:</b> <code>{html.escape(str(exc))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("commit-error")
+
+            if text.startswith("/git "):
+                raw_args = text.split(" ", 1)[1].strip()
+                if not raw_args:
+                    self.send_text(chat_id, "Usage: <code>/git &lt;args...&gt;</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("git-error")
+                # Simple arg split (doesn't handle quoted spaces well, but good for basic commands)
+                import shlex
+                import html
+                try:
+                    args = shlex.split(raw_args)
+                    result = self.channel_service.run_workspace_git_command(
+                        user.user_id,
+                        conversation["workspace_id"],
+                        args,
+                    )
+                    terminal_out = (
+                        f"<b>Terminal: Git</b>\n"
+                        f"<code>$ git {html.escape(raw_args)}</code>\n\n"
+                        f"<pre>{html.escape(result)}</pre>"
+                    )
+                    self.send_text(chat_id, terminal_out, thread_id=thread_token, parse_mode="HTML")
+                    return handled("git-success", workspace_id=conversation["workspace_id"])
+                except Exception as exc:
+                    self.send_text(chat_id, f"<b>Git command failed:</b> <code>{html.escape(str(exc))}</code>", thread_id=thread_token, parse_mode="HTML")
+                    return handled("git-error")
 
             if text == "/reset":
                 client_session_id = self.channel_service.reset_conversation_session(conversation)
-                self.send_text(chat_id, f"Session reset: `{client_session_id}`", thread_id=thread_token)
+                self.send_text(chat_id, f"Session reset: <code>{client_session_id}</code>", thread_id=thread_token, parse_mode="HTML")
                 return handled("reset")
 
             if text in {"/status", "/session"}:
-                self.send_text(chat_id, self._render_status_text(conversation), thread_id=thread_token)
+                self.send_text(chat_id, self._render_status_text(conversation), thread_id=thread_token, parse_mode="HTML")
                 return handled("status")
 
             if text == "/whoami":
@@ -722,11 +785,12 @@ class TelegramChannelAdapter:
                     chat_id,
                     self._render_whoami_text(user, conversation),
                     thread_id=thread_token,
+                    parse_mode="HTML",
                 )
                 return handled("whoami")
 
             if not text:
-                self.send_text(chat_id, "Send text or a supported command.", thread_id=thread_token)
+                self.send_text(chat_id, "Send text or a supported command.", thread_id=thread_token, parse_mode="HTML")
                 return handled("empty")
 
             status_started_at = perf_counter()
@@ -789,7 +853,7 @@ class TelegramChannelAdapter:
                     stage="Failed",
                     started_at=status_started_at,
                 )
-                self.send_text(chat_id, self._render_turn_error(exc), thread_id=thread_token)
+                self.send_text(chat_id, self._render_turn_error(exc), thread_id=thread_token, parse_mode="HTML")
                 record_event(
                     "telegram.turn.failed",
                     component="channel.telegram",
@@ -816,7 +880,7 @@ class TelegramChannelAdapter:
                 started_at=status_started_at,
                 modified_file_count=len(turn.modified_files),
             )
-            self.send_text(chat_id, self._render_turn_reply(turn), thread_id=thread_token)
+            self.send_text(chat_id, self._render_turn_reply(turn), thread_id=thread_token, parse_mode="HTML")
             return handled(
                 "turn",
                 workspace_id=turn.workspace_id,

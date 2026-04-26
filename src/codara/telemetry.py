@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import os
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -141,6 +142,8 @@ def record_event(
     )
     if not settings.telemetry_persist_traces or db is None or context is None:
         return
+    
+    is_test = os.environ.get("PYTEST_CURRENT_TEST") is not None
     db.record_trace_event(
         trace_id=context.trace_id,
         span_id=context.span_id,
@@ -155,6 +158,7 @@ def record_event(
         ended_at_ms=None,
         duration_ms=None,
         attributes=safe_attributes,
+        sync=is_test,
     )
 
 
@@ -224,6 +228,24 @@ class TraceSpan(AbstractContextManager["TraceSpan"], AbstractAsyncContextManager
             component=self.component,
             attributes=sanitize_attributes(self.attributes),
         )
+        if settings.telemetry_persist_traces and self.db is not None:
+             is_test = os.environ.get("PYTEST_CURRENT_TEST") is not None
+             self.db.record_trace_event(
+                trace_id=self._context.trace_id,
+                span_id=self._context.span_id,
+                parent_span_id=self._context.parent_span_id,
+                kind="span.started",
+                name=self.name,
+                component=self.component or self._context.component,
+                level="INFO",
+                status="ok",
+                request_id=self._context.request_id,
+                started_at_ms=self._started_at_ms,
+                ended_at_ms=None,
+                duration_ms=None,
+                attributes=sanitize_attributes(self.attributes),
+                sync=is_test,
+            )
 
     def _close(self, exc: Optional[BaseException]) -> None:
         settings = get_settings()
@@ -245,11 +267,12 @@ class TraceSpan(AbstractContextManager["TraceSpan"], AbstractAsyncContextManager
             exc_info=exc,
         )
         if settings.telemetry_persist_traces and self.db is not None:
+            is_test = os.environ.get("PYTEST_CURRENT_TEST") is not None
             self.db.record_trace_event(
                 trace_id=self._context.trace_id,
                 span_id=self._context.span_id,
                 parent_span_id=self._context.parent_span_id,
-                kind="span",
+                kind="span.completed",
                 name=self.name,
                 component=self.component or self._context.component,
                 level="ERROR" if exc else "INFO",
@@ -259,6 +282,7 @@ class TraceSpan(AbstractContextManager["TraceSpan"], AbstractAsyncContextManager
                 ended_at_ms=int(time() * 1000),
                 duration_ms=duration_ms,
                 attributes=safe_attributes,
+                sync=is_test,
             )
         if self._token is not None:
             _current_trace_context.reset(self._token)

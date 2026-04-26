@@ -1,9 +1,0 @@
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    ".agents/shared.md",
-    ".agents/rules/avoid-these.md",
-    ".agents/rules/compound-engineering.mdc",
-    "AGENTS.md"
-  ]
-}

@@ -10,21 +10,18 @@ The UAG is a robust middleware for stateful, tool-augmented CLI agents.
 - **Workspace Engine**: Handles file-system snapshots, git-based diffing, and workspace locking.
 
 ### 2. Provider Adapters
-- **Codex Adapter**: local `codex exec` execution with isolated credential materialization and resumable sessions.
-- **Gemini Adapter**: local `gemini` CLI execution with resumable sessions and JSON output parsing.
+- **Codex Adapter**: local `codex exec` execution with resumable sessions.
+- **Gemini Adapter**: local `gemini` CLI execution with resumable sessions.
 - **Provider Abstraction**: Unified `ProviderAdapter` protocol for easy extension.
 
-### 3. Token & Context Optimization
-- **Prefix Locking**: Hash-based context resumption to maximize KV-cache hits.
-
-### 4. ATR (Action Translation & Reconstruction)
+### 3. ATR (Action Translation & Reconstruction)
 - **Manual Mode**: Supports returning searchable/replaceable actions to the client instead of applying them.
 - **Regex Extraction**: Parses Aider-style blocks from assistant output.
 
-### 5. Management & Operations
-- **Management API**: Full suite of endpoints for health, session control, and account pool management.
+### 4. Management & Operations
+- **Management API**: Full suite of endpoints for health, session control, and user management.
 - **Audit Logging**: Immutable record of all operator actions.
-- **React Dashboard**: Management UI for system monitoring, accounts, sessions, usage, and user operations.
+- **React Dashboard**: Management UI for system monitoring, workspaces, users, sessions, and observability.
 
 ## Project Structure
 
@@ -34,7 +31,6 @@ The UAG is a robust middleware for stateful, tool-augmented CLI agents.
 │   ├── core/           # Foundational models, compression, ATR
 │   ├── workspace/      # File system engine
 │   ├── database/       # SQLite persistence
-│   ├── accounts/       # Account pool management
 │   ├── adapters/       # Provider-specific protocols
 │   ├── orchestrator/   # Supervisor logic
 │   ├── gateway/        # FastAPI application and API routing
@@ -43,6 +39,7 @@ The UAG is a robust middleware for stateful, tool-augmented CLI agents.
 ├── docs/               # System specifications
 └── README.md           # Entrypoint documentation
 ```
+
 
 ## Getting Started
 

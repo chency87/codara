@@ -48,7 +48,7 @@ def test_configure_logging_is_idempotent_for_same_path(tmp_path):
 
     managed_file_handlers = [
         handler
-        for handler in logging.getLogger().handlers
+        for handler in logging.getLogger("codara").handlers
         if handler.__class__.__name__ in {"RotatingFileHandler", "DatetimeShardedFileHandler"}
     ]
 
