@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/architecture/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>System Architecture - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "System Architecture";
+        var mkdocs_page_input_path = "architecture.md";
+        var mkdocs_page_url = "/codara/codara/architecture/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul class="current">
+                  <li class="toctree-l1 current"><a class="reference internal current" href="#">System Architecture</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#component-overview">Component Overview</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#request-flow">Request Flow</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#internal-layer-responsibilities">Internal Layer Responsibilities</a>
+        <ul>
+    <li class="toctree-l3"><a class="reference internal" href="#1-gateway-layer">1. Gateway Layer</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#2-orchestration-layer">2. Orchestration Layer</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#3-execution-layer">3. Execution Layer</a>
+    </li>
+    <li class="toctree-l3"><a class="reference internal" href="#4-persistence-layer">4. Persistence Layer</a>
+    </li>
+        </ul>
+    </li>
+    </ul>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+          <li class="breadcrumb-item">Architecture</li>
+      <li class="breadcrumb-item active">System Architecture</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/architecture.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="system-architecture">System Architecture<a class="headerlink" href="#system-architecture" title="Permanent link">&para;</a></h1>
+<p>Codara is built as a modular gateway that coordinates between external API clients, internal orchestration logic, and local CLI-native provider runtimes.</p>
+<h2 id="component-overview">Component Overview<a class="headerlink" href="#component-overview" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code><span class="n">graph</span><span class="w"> </span><span class="n">TD</span>
+<span class="w">    </span><span class="n">Client</span><span class="p">[</span><span class="n">API</span><span class="w"> </span><span class="n">Clients</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">SDKs</span><span class="p">]</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Gateway</span><span class="p">[</span><span class="n">FastAPI</span><span class="w"> </span><span class="n">Gateway</span><span class="p">]</span>
+<span class="w">    </span><span class="n">Gateway</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Auth</span><span class="p">[</span><span class="n">Auth</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Token</span><span class="w"> </span><span class="n">Validation</span><span class="p">]</span>
+<span class="w">    </span><span class="n">Gateway</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">InfService</span><span class="p">[</span><span class="n">Inference</span><span class="w"> </span><span class="n">Service</span><span class="p">]</span>
+<span class="w">    </span><span class="n">Gateway</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">ChannelService</span><span class="p">[</span><span class="n">Channel</span><span class="w"> </span><span class="n">Service</span><span class="p">]</span>
+
+<span class="w">    </span><span class="n">InfService</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Orchestrator</span><span class="p">[</span><span class="n">Orchestrator</span><span class="w"> </span><span class="n">Engine</span><span class="p">]</span>
+<span class="w">    </span><span class="n">ChannelService</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Orchestrator</span>
+
+<span class="w">    </span><span class="n">Orchestrator</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">WSEngine</span><span class="p">[</span><span class="n">Workspace</span><span class="w"> </span><span class="n">Engine</span><span class="p">]</span>
+<span class="w">    </span><span class="n">Orchestrator</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Adapters</span><span class="p">[</span><span class="n">Provider</span><span class="w"> </span><span class="n">Adapters</span><span class="p">]</span>
+
+<span class="w">    </span><span class="n">Adapters</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">CLI</span><span class="p">[</span><span class="n">Local</span><span class="w"> </span><span class="n">CLIs</span><span class="o">:</span><span class="w"> </span><span class="n">Gemini</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">Codex</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">OpenCode</span><span class="p">]</span>
+
+<span class="w">    </span><span class="n">Orchestrator</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">SQLite</span><span class="p">[(</span><span class="n">SQLite</span><span class="w"> </span><span class="n">Persistence</span><span class="p">)]</span>
+<span class="w">    </span><span class="n">Orchestrator</span><span class="w"> </span><span class="o">--&gt;</span><span class="w"> </span><span class="n">Logs</span><span class="p">[(</span><span class="n">File</span><span class="o">-</span><span class="n">backed</span><span class="w"> </span><span class="n">Logs</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Traces</span><span class="p">)]</span>
+</code></pre></div>
+
+<h2 id="request-flow">Request Flow<a class="headerlink" href="#request-flow" title="Permanent link">&para;</a></h2>
+<p>The following diagram illustrates the lifecycle of a standard inference request:</p>
+<div class="codehilite"><pre><span></span><code><span class="n">sequenceDiagram</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">C</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="n">Client</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">G</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="n">Gateway</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">O</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="n">Orchestrator</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">W</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="n">Workspace</span><span class="w"> </span><span class="n">Engine</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">A</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="n">Provider</span><span class="w"> </span><span class="n">Adapter</span>
+<span class="w">    </span><span class="n">participant</span><span class="w"> </span><span class="n">P</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="kr">Local</span><span class="w"> </span><span class="n">CLI</span>
+
+<span class="w">    </span><span class="n">C</span><span class="o">-&gt;&gt;</span><span class="n">G</span><span class="o">:</span><span class="w"> </span><span class="n">POST</span><span class="w"> </span><span class="o">/</span><span class="n">v1</span><span class="o">/</span><span class="n">chat</span><span class="o">/</span><span class="n">completions</span><span class="w"> </span><span class="p">(</span><span class="n">with</span><span class="w"> </span><span class="n">API</span><span class="w"> </span><span class="n">Key</span><span class="p">)</span>
+<span class="w">    </span><span class="n">G</span><span class="o">-&gt;&gt;</span><span class="n">G</span><span class="o">:</span><span class="w"> </span><span class="kr">Validate</span><span class="w"> </span><span class="n">API</span><span class="w"> </span><span class="n">Key</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Resolve</span><span class="w"> </span><span class="n">User</span>
+<span class="w">    </span><span class="n">G</span><span class="o">-&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="n">handle_request</span><span class="p">(</span><span class="n">messages</span><span class="p">,</span><span class="w"> </span><span class="n">options</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="n">Acquire</span><span class="w"> </span><span class="n">Session</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">User</span><span class="w"> </span><span class="n">Locks</span>
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">W</span><span class="o">:</span><span class="w"> </span><span class="n">Acquire</span><span class="w"> </span><span class="n">Workspace</span><span class="w"> </span><span class="n">Lock</span>
+<span class="w">    </span><span class="n">W</span><span class="o">-&gt;&gt;</span><span class="n">W</span><span class="o">:</span><span class="w"> </span><span class="n">Take</span><span class="w"> </span><span class="n">Filesystem</span><span class="w"> </span><span class="n">Snapshot</span><span class="w"> </span><span class="p">(</span><span class="nf">if</span><span class="w"> </span><span class="kr">not</span><span class="w"> </span><span class="n">Git</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">A</span><span class="o">:</span><span class="w"> </span><span class="n">send_turn</span><span class="p">(</span><span class="n">session</span><span class="p">,</span><span class="w"> </span><span class="n">messages</span><span class="p">)</span>
+<span class="w">    </span><span class="n">A</span><span class="o">-&gt;&gt;</span><span class="n">P</span><span class="o">:</span><span class="w"> </span><span class="n">Execute</span><span class="w"> </span><span class="n">CLI</span><span class="w"> </span><span class="p">(</span><span class="n">gemini</span><span class="o">/</span><span class="n">codex</span><span class="o">/</span><span class="n">opencode</span><span class="p">)</span>
+<span class="w">    </span><span class="n">P</span><span class="o">--&gt;&gt;</span><span class="n">A</span><span class="o">:</span><span class="w"> </span><span class="n">CLI</span><span class="w"> </span><span class="kr">Output</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Backend</span><span class="w"> </span><span class="n">ID</span>
+<span class="w">    </span><span class="n">A</span><span class="o">--&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="n">TurnResult</span>
+
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">W</span><span class="o">:</span><span class="w"> </span><span class="n">generate_diff</span><span class="p">()</span>
+<span class="w">    </span><span class="n">W</span><span class="o">--&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="n">Modified</span><span class="w"> </span><span class="n">Files</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Unified</span><span class="w"> </span><span class="n">Diff</span>
+
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="n">Extract</span><span class="w"> </span><span class="n">ATR</span><span class="w"> </span><span class="n">Actions</span>
+<span class="w">    </span><span class="n">O</span><span class="o">-&gt;&gt;</span><span class="n">O</span><span class="o">:</span><span class="w"> </span><span class="kr">Persist</span><span class="w"> </span><span class="n">Session</span><span class="p">,</span><span class="w"> </span><span class="n">Task</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Turn</span><span class="w"> </span><span class="n">State</span>
+
+<span class="w">    </span><span class="n">O</span><span class="o">--&gt;&gt;</span><span class="n">G</span><span class="o">:</span><span class="w"> </span><span class="n">Final</span><span class="w"> </span><span class="n">TurnResult</span>
+<span class="w">    </span><span class="n">G</span><span class="o">--&gt;&gt;</span><span class="n">C</span><span class="o">:</span><span class="w"> </span><span class="n">OpenAI</span><span class="o">-</span><span class="n">compatible</span><span class="w"> </span><span class="n">JSON</span><span class="w"> </span><span class="n">Response</span>
+</code></pre></div>
+
+<h2 id="internal-layer-responsibilities">Internal Layer Responsibilities<a class="headerlink" href="#internal-layer-responsibilities" title="Permanent link">&para;</a></h2>
+<h3 id="1-gateway-layer">1. Gateway Layer<a class="headerlink" href="#1-gateway-layer" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>FastAPI Application</strong>: Serves as the web entry point.</li>
+<li><strong>Request Shaping</strong>: Normalizes OpenAI-style requests into internal <code>UagOptions</code>.</li>
+<li><strong>Security</strong>: Handles JWT-based dashboard auth and API-key-based user auth.</li>
+</ul>
+<h3 id="2-orchestration-layer">2. Orchestration Layer<a class="headerlink" href="#2-orchestration-layer" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Concurrency Control</strong>: Uses semaphores and per-session/per-user locks to prevent race conditions.</li>
+<li><strong>Task Management</strong>: Creates and tracks the lifecycle of every request as a <code>Task</code>.</li>
+<li><strong>State Persistence</strong>: Interfaces with SQLite to store long-lived metadata.</li>
+</ul>
+<h3 id="3-execution-layer">3. Execution Layer<a class="headerlink" href="#3-execution-layer" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Provider Adapters</strong>: Specialized wrappers for different LLM runtimes (Gemini, Codex, OpenCode). They communicate with local CLIs via subprocesses.</li>
+<li><strong>Workspace Engine</strong>: Manages the directory where agents work. It handles locking, Git integration, and filesystem diffing.</li>
+</ul>
+<h3 id="4-persistence-layer">4. Persistence Layer<a class="headerlink" href="#4-persistence-layer" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>SQLite</strong>: Primary store for users, workspaces, sessions, tasks, and audit logs.</li>
+<li><strong>Log Shards</strong>: Transactional execution logs and traces stored as individual files for high-volume observability.</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href=".." class="btn btn-neutral float-left" title="Home"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href=".." style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/concepts/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Core Concepts - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Core Concepts";
+        var mkdocs_page_input_path = "concepts.md";
+        var mkdocs_page_url = "/codara/codara/concepts/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">System Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Core Concepts</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/concepts.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="core-concepts">Core Concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h1>
+<p>Understanding the primary entities in Codara is essential for both integration and management.</p>
+<h2 id="1-workspaces">1. Workspaces<a class="headerlink" href="#1-workspaces" title="Permanent link">&para;</a></h2>
+<p>A <strong>Workspace</strong> represents a dedicated directory on the filesystem where a coding agent performs its tasks.</p>
+<ul>
+<li><strong>Isolation</strong>: Each workspace is isolated from others, preventing cross-task interference.</li>
+<li><strong>Initialization</strong>: Workspaces can be initialized from templates (e.g., <code>default</code>, <code>python</code>).</li>
+<li><strong>Tracking</strong>: The Workspace Engine monitors changes. If the directory is a Git repository, it uses Git metadata for diffs; otherwise, it falls back to SHA-256 hash comparison.</li>
+<li><strong>Users</strong>: Workspaces are bound to a specific <code>user_id</code>.</li>
+</ul>
+<h2 id="2-sessions">2. Sessions<a class="headerlink" href="#2-sessions" title="Permanent link">&para;</a></h2>
+<p>A <strong>Session</strong> tracks a long-lived conversation or interaction sequence between a user and a provider.</p>
+<ul>
+<li><strong>Client Session ID</strong>: A stable ID provided by the client (e.g., a thread ID).</li>
+<li><strong>Backend ID</strong>: The internal ID generated by the provider (e.g., Gemini's session ID). Codara maps the stable Client ID to the volatile Backend ID.</li>
+<li><strong>Status</strong>:<ul>
+<li><code>idle</code>: Ready for a new turn.</li>
+<li><code>active</code>: Currently executing an agent turn.</li>
+<li><code>dirty</code>: An execution failed or timed out, potentially leaving the workspace or provider state inconsistent.</li>
+</ul>
+</li>
+<li><strong>Persistence</strong>: Session metadata is stored in SQLite, allowing stateful resumption even after gateway restarts.</li>
+</ul>
+<h2 id="3-tasks">3. Tasks<a class="headerlink" href="#3-tasks" title="Permanent link">&para;</a></h2>
+<p>A <strong>Task</strong> is created for every single inference request. It represents the lifecycle of a single "turn."</p>
+<ul>
+<li><strong>Audit Trail</strong>: Tasks provide a detailed history of what was asked and what the agent did.</li>
+<li><strong>States</strong>: <code>pending</code>, <code>running</code>, <code>completed</code>, <code>failed</code>.</li>
+<li><strong>Result</strong>: Once completed, the task stores a <code>TurnResult</code>, which includes:<ul>
+<li>The raw output from the agent.</li>
+<li>The list of modified files.</li>
+<li>The unified diff of the changes.</li>
+<li>Extracted <strong>ATR</strong> (Agent Tool Result) actions.</li>
+</ul>
+</li>
+</ul>
+<h2 id="4-providers-adapters">4. Providers &amp; Adapters<a class="headerlink" href="#4-providers-adapters" title="Permanent link">&para;</a></h2>
+<p>Codara supports multiple underlying runtimes through a pluggable <strong>Adapter</strong> system.</p>
+<ul>
+<li><strong>Codex</strong>: Adapter for OpenAI's Codex CLI.</li>
+<li><strong>Gemini</strong>: Adapter for Google's Gemini CLI.</li>
+<li><strong>OpenCode</strong>: Adapter for the OpenCode AI CLI.</li>
+</ul>
+<p>Adapters handle the specifics of:
+- Constructing CLI commands.
+- Parsing stdout/stderr.
+- Managing session resumption flags (like <code>--resume</code>).
+- Detecting stalls and auth failures.</p>
+<h2 id="5-atr-agent-tool-results">5. ATR (Agent Tool Results)<a class="headerlink" href="#5-atr-agent-tool-results" title="Permanent link">&para;</a></h2>
+<p>Codara automatically parses agent outputs for structured tool calls or result markers. These are stored as <strong>Actions</strong> within the Task result, enabling the dashboard to display interactive widgets or summaries of what the agent "did" beyond just producing text.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

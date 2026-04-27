@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/observability/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Observability - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Observability";
+        var mkdocs_page_input_path = "observability.md";
+        var mkdocs_page_url = "/codara/codara/observability/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">System Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Observability</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/observability.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h1>
+<p>Codara provides deep visibility into the interactions between clients, the gateway, and the underlying provider runtimes.</p>
+<h2 id="1-traces">1. Traces<a class="headerlink" href="#1-traces" title="Permanent link">&para;</a></h2>
+<p>Codara captures detailed execution traces for every request.</p>
+<ul>
+<li><strong>Request ID</strong>: Every call to the gateway is assigned a unique Request ID.</li>
+<li><strong>Trace Context</strong>: Traces are propagated through the Orchestrator to the Adapters.</li>
+<li><strong>Persistence</strong>: Traces are stored as individual files under <code>logs/traces/</code> for efficient high-volume writes and later retrieval by the dashboard.</li>
+<li><strong>Visualization</strong>: The "Explorer" page in the dashboard provides a timeline view of these traces.</li>
+</ul>
+<h2 id="2-logs">2. Logs<a class="headerlink" href="#2-logs" title="Permanent link">&para;</a></h2>
+<p>Codara employs a multi-tiered logging strategy:</p>
+<ul>
+<li><strong>System Logs</strong>: High-level application events (starting services, auth failures) written to standard output and <code>logs/codara.log</code>.</li>
+<li><strong>Runtime Logs</strong>: Transactional logs for individual agent turns, capturing specific logic branching within the Orchestrator.</li>
+<li><strong>CLI Capture</strong>: Full capture of <code>stdout</code> and <code>stderr</code> from the provider CLIs (Gemini, Codex, etc.). These are stored in <code>logs/cli-runs/</code> and are crucial for debugging "stalled" or failed agent executions.</li>
+</ul>
+<h2 id="3-audit-log">3. Audit Log<a class="headerlink" href="#3-audit-log" title="Permanent link">&para;</a></h2>
+<p>The <strong>Audit Log</strong> tracks all management-level actions performed by operators.</p>
+<ul>
+<li><strong>Actions</strong>: Creating users, provisioning API keys, deleting workspaces, or resetting sessions.</li>
+<li><strong>Actors</strong>: Records the specific operator identity (or system process) that performed the action.</li>
+<li><strong>State Changes</strong>: When possible, it captures the "before" and "after" state of the affected entity.</li>
+</ul>
+<h2 id="4-health-monitoring">4. Health Monitoring<a class="headerlink" href="#4-health-monitoring" title="Permanent link">&para;</a></h2>
+<p>The gateway exposes a health check endpoint at <code>/management/v1/health</code>.</p>
+<p>It reports:
+- <strong>Database Status</strong>: Connectivity to SQLite.
+- <strong>Provider Status</strong>: Availability of local CLI binaries.
+- <strong>System Load</strong>: Current task concurrency vs. limits.
+- <strong>Disk Usage</strong>: Available space in the workspace volume.</p>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

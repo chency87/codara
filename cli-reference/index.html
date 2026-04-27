@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/cli-reference/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>CLI Reference - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "CLI Reference";
+        var mkdocs_page_input_path = "cli-reference.md";
+        var mkdocs_page_url = "/codara/codara/cli-reference/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">System Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">CLI Reference</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/cli-reference.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
+<p>The <code>codara</code> command-line tool provides utilities for starting the gateway and managing workspaces.</p>
+<h2 id="1-system-commands">1. System Commands<a class="headerlink" href="#1-system-commands" title="Permanent link">&para;</a></h2>
+<h3 id="start-the-gateway">Start the Gateway<a class="headerlink" href="#start-the-gateway" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>codara<span class="w"> </span>serve<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+</code></pre></div>
+
+<ul>
+<li><code>--build-ui</code>: Force a rebuild of the dashboard before starting.</li>
+</ul>
+<h3 id="check-version">Check Version<a class="headerlink" href="#check-version" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>codara<span class="w"> </span>version
+codara<span class="w"> </span>version<span class="w"> </span>--check<span class="w">  </span><span class="c1"># Check for updates on GitHub</span>
+</code></pre></div>
+
+<h2 id="2-workspace-management">2. Workspace Management<a class="headerlink" href="#2-workspace-management" title="Permanent link">&para;</a></h2>
+<p>Manage isolated agent directories directly from the host.</p>
+<h3 id="create-a-workspace">Create a Workspace<a class="headerlink" href="#create-a-workspace" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>codara<span class="w"> </span>workspace<span class="w"> </span>create<span class="w"> </span>news-pulse
+codara<span class="w"> </span>workspace<span class="w"> </span>create<span class="w"> </span>agent-lab<span class="w"> </span>--template<span class="w"> </span>python<span class="w"> </span>--provider<span class="w"> </span>codex
+</code></pre></div>
+
+<p><strong>Templates</strong>:
+- <code>default</code>: Basic structure (README, docs, src, scripts, tests).
+- <code>python</code>: Python-specific layout.
+- <code>docs</code>: Documentation-only layout.
+- <code>empty</code>: Empty directory.</p>
+<h3 id="list-and-info">List and Info<a class="headerlink" href="#list-and-info" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>codara<span class="w"> </span>workspace<span class="w"> </span>list
+codara<span class="w"> </span>workspace<span class="w"> </span>info<span class="w"> </span>news-pulse
+</code></pre></div>
+
+<h2 id="3-environment-overrides">3. Environment Overrides<a class="headerlink" href="#3-environment-overrides" title="Permanent link">&para;</a></h2>
+<p>The CLI respects environment variables which override <code>codara.toml</code> settings:</p>
+<ul>
+<li><code>API_TOKEN</code>: Master secret for dashboard/management API.</li>
+<li><code>UAG_WORKSPACES_ROOT</code>: Path to provisioned workspaces.</li>
+<li><code>UAG_DATABASE_PATH</code>: Path to SQLite database.</li>
+</ul>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

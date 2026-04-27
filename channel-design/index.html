@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/channel-design/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Channel Layer Guide - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Channel Layer Guide";
+        var mkdocs_page_input_path = "channel-design.md";
+        var mkdocs_page_url = "/codara/codara/channel-design/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">System Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Channel Layer Guide</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/channel-design.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="channel-layer-guide">Channel Layer Guide<a class="headerlink" href="#channel-layer-guide" title="Permanent link">&para;</a></h1>
+<p>This document describes the current channel integration layer in Codara.</p>
+<p>Current status:</p>
+<ul>
+<li>Telegram is fully implemented.</li>
+<li>Lark and Feishu are scaffolded as future adapters, not complete runtime integrations.</li>
+</ul>
+<h2 id="1-channel-design-goals">1. Channel Design Goals<a class="headerlink" href="#1-channel-design-goals" title="Permanent link">&para;</a></h2>
+<p>The channel layer lets a user operate a Codara workspace from a messaging platform without inventing a second runtime model.</p>
+<p>The key rule is:</p>
+<ul>
+<li>channel messages must be translated into the same user-bound execution flow already used by <code>/v1/chat/completions</code></li>
+</ul>
+<h2 id="2-runtime-architecture">2. Runtime Architecture<a class="headerlink" href="#2-runtime-architecture" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code>Telegram Update
+   │
+   ▼
+TelegramChannelAdapter
+   │
+   ├─ validate bot / webhook secret / receive mode
+   ├─ acknowledge inbound message
+   └─ parse command or free-text turn
+   │
+   ▼
+ChannelService
+   │
+   ├─ consume one-time link token
+   ├─ resolve linked Codara user
+   ├─ load or create channel conversation
+   └─ update workspace/provider/session state
+   │
+   ▼
+InferenceService
+   │
+   └─ execute the standard user-bound turn flow
+   │
+   ▼
+TelegramChannelAdapter sends the reply
+</code></pre></div>
+
+<h2 id="3-persistence-model">3. Persistence Model<a class="headerlink" href="#3-persistence-model" title="Permanent link">&para;</a></h2>
+<p>Codara stores channel state in SQLite.</p>
+<h3 id="31-linked-external-identities">3.1 Linked external identities<a class="headerlink" href="#31-linked-external-identities" title="Permanent link">&para;</a></h3>
+<p><code>channel_user_links</code></p>
+<ul>
+<li>keyed by <code>(channel, bot_name, external_user_id)</code></li>
+<li>links one external identity to one Codara user</li>
+</ul>
+<h3 id="32-conversation-state">3.2 Conversation state<a class="headerlink" href="#32-conversation-state" title="Permanent link">&para;</a></h3>
+<p><code>channel_conversations</code></p>
+<ul>
+<li>keyed by <code>(channel, bot_name, conversation_key)</code></li>
+<li>stores:</li>
+<li><code>workspace_id</code></li>
+<li><code>provider</code></li>
+<li><code>session_label</code></li>
+<li>external chat and thread identifiers</li>
+</ul>
+<h3 id="33-link-tokens">3.3 Link tokens<a class="headerlink" href="#33-link-tokens" title="Permanent link">&para;</a></h3>
+<p><code>channel_link_tokens</code></p>
+<ul>
+<li>one-time expiring link tokens</li>
+<li>created by operators from the management plane</li>
+<li>consumed by <code>/link &lt;token&gt;</code></li>
+</ul>
+<h3 id="34-runtime-state">3.4 Runtime state<a class="headerlink" href="#34-runtime-state" title="Permanent link">&para;</a></h3>
+<p><code>channel_runtime_state</code></p>
+<ul>
+<li>keyed by <code>(channel, bot_name, state_key)</code></li>
+<li>currently used for persisted Telegram polling offsets</li>
+</ul>
+<h2 id="4-telegram-configuration">4. Telegram Configuration<a class="headerlink" href="#4-telegram-configuration" title="Permanent link">&para;</a></h2>
+<p>Current config shape:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">[channels.telegram]</span>
+<span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">receive_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;polling&quot;</span><span class="w">   </span><span class="c1"># or &quot;webhook&quot;</span>
+<span class="n">mention_only</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+<span class="n">api_base</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://api.telegram.org&quot;</span>
+
+<span class="k">[[channels.telegram.bots]]</span>
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;codara-bot&quot;</span>
+<span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<span class="n">token</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="n">webhook_secret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="n">username</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;your_bot_username&quot;</span>
+</code></pre></div>
+
+<p>Important notes:</p>
+<ul>
+<li>multiple Telegram bots are supported</li>
+<li>bindings and conversations are keyed by both <code>channel</code> and <code>bot_name</code></li>
+<li>only one receive mode is used at runtime for Telegram: <code>webhook</code> or <code>polling</code></li>
+</ul>
+<h2 id="5-telegram-receive-modes">5. Telegram Receive Modes<a class="headerlink" href="#5-telegram-receive-modes" title="Permanent link">&para;</a></h2>
+<h3 id="51-webhook-mode">5.1 Webhook mode<a class="headerlink" href="#51-webhook-mode" title="Permanent link">&para;</a></h3>
+<p>Route:</p>
+<ul>
+<li><code>POST /channels/telegram/{bot_name}/webhook</code></li>
+</ul>
+<p>Expected verification header:</p>
+<ul>
+<li><code>X-Telegram-Bot-Api-Secret-Token</code></li>
+</ul>
+<h3 id="52-polling-mode">5.2 Polling mode<a class="headerlink" href="#52-polling-mode" title="Permanent link">&para;</a></h3>
+<p>When <code>receive_mode = "polling"</code>:</p>
+<ul>
+<li>Codara starts a polling worker at application startup</li>
+<li>it calls <code>deleteWebhook</code> before polling</li>
+<li>it uses <code>getUpdates</code></li>
+<li>it stores the latest offset in <code>channel_runtime_state</code></li>
+<li>the webhook route returns <code>503</code> for that bot</li>
+</ul>
+<h2 id="6-telegram-commands">6. Telegram Commands<a class="headerlink" href="#6-telegram-commands" title="Permanent link">&para;</a></h2>
+<p>Current built-in commands:</p>
+<ul>
+<li><code>/start</code></li>
+<li><code>/help</code></li>
+<li><code>/commands</code></li>
+<li><code>/link &lt;token&gt;</code></li>
+<li><code>/whoami</code></li>
+<li><code>/workspace &lt;workspace_id&gt;</code></li>
+<li><code>/projects</code></li>
+<li><code>/project &lt;name&gt;</code></li>
+<li><code>/project_create &lt;name&gt; [default|python|docs|empty]</code></li>
+<li><code>/project_info &lt;name&gt;</code></li>
+<li><code>/provider &lt;codex|gemini|opencode&gt;</code></li>
+<li><code>/status</code></li>
+<li><code>/session</code></li>
+<li><code>/reset</code></li>
+</ul>
+<p>Codara also registers Telegram bot commands at startup via <code>setMyCommands</code>.</p>
+<p>Project commands are scoped to the linked user's base workspace. For example,
+<code>/project_create news-pulse python</code> creates <code>&lt;user-workspace&gt;/news-pulse</code>,
+initializes the Python project layout, writes <code>.codara/project.toml</code>, and
+switches the conversation workspace to <code>news-pulse</code>.</p>
+<h2 id="7-link-flow">7. Link Flow<a class="headerlink" href="#7-link-flow" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code>Operator creates user in dashboard or API
+   │
+   ▼
+Operator creates link token for that user and bot
+   │
+   ▼
+User opens Telegram bot chat
+   │
+   ▼
+/link &lt;raw_token&gt;
+   │
+   ▼
+channel_user_links row created
+   │
+   ▼
+future messages resolve to that Codara user
+</code></pre></div>
+
+<p>Important boundary:</p>
+<ul>
+<li>the link token is not the user API key</li>
+<li>it is a one-time expiring channel-binding token</li>
+</ul>
+<h2 id="8-conversation-flow">8. Conversation Flow<a class="headerlink" href="#8-conversation-flow" title="Permanent link">&para;</a></h2>
+<div class="codehilite"><pre><span></span><code>User sends message
+   │
+   ▼
+adapter resolves conversation key
+   │
+   ▼
+ChannelService loads or creates conversation row
+   │
+   ▼
+conversation row supplies:
+  - workspace_id
+  - provider
+  - stable client_session_id
+   │
+   ▼
+shared InferenceService executes turn
+   │
+   ▼
+reply text returned to the chat
+</code></pre></div>
+
+<p>Conversation state is intentionally lightweight:</p>
+<ul>
+<li>it keeps workspace and provider selection</li>
+<li>it keeps stable session continuity</li>
+<li>it does not allow arbitrary filesystem paths from chat messages</li>
+</ul>
+<h2 id="9-attachments-and-acknowledgement">9. Attachments and Acknowledgement<a class="headerlink" href="#9-attachments-and-acknowledgement" title="Permanent link">&para;</a></h2>
+<p>Current Telegram adapter behavior:</p>
+<ul>
+<li>text messages become ordinary user turns</li>
+<li>Telegram documents are staged into the bound workspace and forwarded through the shared attachment pipeline</li>
+<li><code>/start</code>, <code>/help</code>, and <code>/commands</code> provide in-chat usage guidance</li>
+<li><code>/whoami</code> reports the linked Codara user plus the current workspace/provider/session context</li>
+<li>inbound messages are acknowledged best-effort with:</li>
+<li><code>setMessageReaction</code></li>
+<li>fallback to <code>sendChatAction("typing")</code></li>
+</ul>
+<h2 id="10-security-model">10. Security Model<a class="headerlink" href="#10-security-model" title="Permanent link">&para;</a></h2>
+<p>Current channel security boundaries:</p>
+<ul>
+<li>external identities must be linked explicitly</li>
+<li>link tokens are one-time and expiring</li>
+<li>webhook requests can be secret-verified</li>
+<li>channel users are always routed through real Codara user bindings</li>
+<li>chat commands do not accept arbitrary <code>workspace_root</code> values</li>
+</ul>
+<h2 id="11-current-scope-and-future-work">11. Current Scope and Future Work<a class="headerlink" href="#11-current-scope-and-future-work" title="Permanent link">&para;</a></h2>
+<p>Implemented today:</p>
+<ul>
+<li>Telegram multi-bot config</li>
+<li>webhook mode</li>
+<li>polling mode</li>
+<li>persisted polling offsets</li>
+<li>user linking</li>
+<li>workspace/provider/session commands</li>
+<li>text and document turns</li>
+</ul>
+<p>Not fully implemented yet:</p>
+<ul>
+<li>Lark runtime adapter</li>
+<li>Feishu runtime adapter</li>
+<li>richer per-platform UI cards and structured interactive controls</li>
+</ul>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>

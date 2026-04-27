@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="canonical" href="https://github.com/codara/codara/management-api/" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Management API and Dashboard Guide - Codara</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Management API and Dashboard Guide";
+        var mkdocs_page_input_path = "management-api.md";
+        var mkdocs_page_url = "/codara/codara/management-api/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> Codara
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Architecture</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="../architecture/">System Architecture</a>
+                  </li>
+                  <li class="toctree-l1"><a class="" href="../token_usage.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../api-dashboard.md">API & Dashboard</a>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Technical Documentation</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="" href="../technical-documentation.md">None</a>
+                  </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../alignment-judgement.md">Alignment Judgement</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="" href="../user-management-design.md">User Management</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">Codara</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Management API and Dashboard Guide</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/codara/codara/edit/master/docs/management-api.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="management-api-and-dashboard-guide">Management API and Dashboard Guide<a class="headerlink" href="#management-api-and-dashboard-guide" title="Permanent link">&para;</a></h1>
+<p>This document describes the current Codara control plane: the <code>/management/v1/*</code> APIs and the <code>/dashboard</code> UI that consumes them.</p>
+<h2 id="1-control-plane-model">1. Control-Plane Model<a class="headerlink" href="#1-control-plane-model" title="Permanent link">&para;</a></h2>
+<p>The dashboard is a first-party client of the management API. It does not have privileged backend-only data access.</p>
+<div class="codehilite"><pre><span></span><code>Operator
+   │
+   ▼
+/dashboard login
+   │
+   ▼
+POST /management/v1/auth/token
+   │
+   ▼
+Bearer token in sessionStorage
+   │
+   ▼
+Dashboard pages query /management/v1/*
+</code></pre></div>
+
+<h2 id="2-authentication">2. Authentication<a class="headerlink" href="#2-authentication" title="Permanent link">&para;</a></h2>
+<p>Management endpoints require an operator bearer token or the configured management secret for token minting.</p>
+<p>Important notes:</p>
+<ul>
+<li>the login screen exchanges the operator secret for a bearer token</li>
+<li>the dashboard stores the access token in <code>sessionStorage</code></li>
+<li><code>API_TOKEN</code> remains the primary operational secret name</li>
+<li><code>UAG_MGMT_SECRET</code> is a supported fallback alias</li>
+</ul>
+<h2 id="3-current-management-api-surface">3. Current Management API Surface<a class="headerlink" href="#3-current-management-api-surface" title="Permanent link">&para;</a></h2>
+<h3 id="31-users">3.1 Users<a class="headerlink" href="#31-users" title="Permanent link">&para;</a></h3>
+<p>Routes:</p>
+<ul>
+<li><code>GET /management/v1/users</code></li>
+<li><code>GET /management/v1/users/{user_id}</code></li>
+<li><code>POST /management/v1/users</code></li>
+<li><code>POST /management/v1/users/{user_id}/suspend</code></li>
+<li><code>POST /management/v1/users/{user_id}/unsuspend</code></li>
+<li><code>DELETE /management/v1/users/{user_id}</code></li>
+<li><code>GET /management/v1/users/{user_id}/keys</code></li>
+<li><code>DELETE /management/v1/users/{user_id}/keys/{key_id}</code></li>
+<li><code>POST /management/v1/users/{user_id}/keys/rotate</code></li>
+<li><code>POST /management/v1/users/{user_id}/channels/link-token</code></li>
+<li><code>POST /management/v1/users/{user_id}/workspace/reset</code></li>
+</ul>
+<p>Dashboard behavior:</p>
+<ul>
+<li>the Users page shows the real <code>user_id</code></li>
+<li>operators can rotate keys</li>
+<li>operators can create Telegram link tokens</li>
+<li>operators can reset a user's workspace sessions</li>
+</ul>
+<h3 id="32-workspaces">3.2 Workspaces<a class="headerlink" href="#32-workspaces" title="Permanent link">&para;</a></h3>
+<p>Routes:</p>
+<ul>
+<li><code>GET /management/v1/workspaces</code></li>
+<li><code>GET /management/v1/workspaces/{workspace_id}</code></li>
+<li><code>POST /management/v1/workspaces/{workspace_id}/reset</code></li>
+<li><code>DELETE /management/v1/workspaces/{workspace_id}</code></li>
+</ul>
+<p>The Workspaces page is the operator-facing inventory of the managed workspace tree. It includes git metadata, bound users, and bound sessions.</p>
+<h3 id="33-sessions">3.3 Sessions<a class="headerlink" href="#33-sessions" title="Permanent link">&para;</a></h3>
+<p>Routes:</p>
+<ul>
+<li><code>GET /management/v1/sessions</code></li>
+<li><code>GET /management/v1/sessions/{session_id}</code></li>
+<li><code>GET /management/v1/sessions/{session_id}/turns</code></li>
+<li><code>DELETE /management/v1/sessions/{session_id}</code></li>
+<li><code>POST /management/v1/sessions/{session_id}/reset</code></li>
+</ul>
+<h3 id="34-observability">3.4 Observability<a class="headerlink" href="#34-observability" title="Permanent link">&para;</a></h3>
+<p>Routes:</p>
+<ul>
+<li><code>GET /management/v1/health</code></li>
+<li><code>GET /management/v1/health/providers</code></li>
+<li><code>GET /management/v1/providers/models</code></li>
+<li><code>GET /management/v1/overview</code></li>
+<li><code>GET /management/v1/metrics</code></li>
+<li><code>GET /management/v1/traces</code></li>
+<li><code>GET /management/v1/traces/{trace_id}</code></li>
+<li><code>GET /management/v1/logs</code></li>
+<li><code>POST /management/v1/observability/prune</code></li>
+</ul>
+<p>Observability storage model:</p>
+<ul>
+<li>traces are file-backed structured events</li>
+<li>runtime logs are file-backed JSONL shards</li>
+<li>the API merges or filters them at query time</li>
+</ul>
+<h3 id="35-audit-and-playground">3.5 Audit and Playground<a class="headerlink" href="#35-audit-and-playground" title="Permanent link">&para;</a></h3>
+<p>Routes:</p>
+<ul>
+<li><code>GET /management/v1/audit</code></li>
+<li><code>POST /management/v1/playground/chat</code></li>
+</ul>
+<p>The Playground is intentionally routed through a dedicated dashboard admin user rather than an ad hoc operator-only execution path.</p>
+<h2 id="4-dashboard-page-map">4. Dashboard Page Map<a class="headerlink" href="#4-dashboard-page-map" title="Permanent link">&para;</a></h2>
+<p>The current dashboard routes and responsibilities are:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Page</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>Overview</td>
+<td>High-level runtime, provider, and audit summary</td>
+</tr>
+<tr>
+<td><code>/playground</code></td>
+<td>Agent Playground</td>
+<td>Operator testing through the shared user-bound flow</td>
+</tr>
+<tr>
+<td><code>/sessions</code></td>
+<td>Active Sessions</td>
+<td>Inspect, copy, reset, or delete sessions</td>
+</tr>
+<tr>
+<td><code>/workspaces</code></td>
+<td>Workspaces</td>
+<td>Inspect managed workspaces and reset/delete them</td>
+</tr>
+<tr>
+<td><code>/users</code></td>
+<td>Users</td>
+<td>Provision users, rotate keys, issue Telegram link tokens, reset workspace sessions</td>
+</tr>
+<tr>
+<td><code>/providers</code></td>
+<td>Providers</td>
+<td>Runtime provider readiness and model inventory</td>
+</tr>
+<tr>
+<td><code>/observability</code></td>
+<td>Observability</td>
+<td>Unified trace + runtime-log workflow</td>
+</tr>
+<tr>
+<td><code>/audit</code></td>
+<td>Audit Logs</td>
+<td>Search and inspect management mutations</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-key-operator-workflows">5. Key Operator Workflows<a class="headerlink" href="#5-key-operator-workflows" title="Permanent link">&para;</a></h2>
+<h3 id="51-provision-a-user">5.1 Provision a User<a class="headerlink" href="#51-provision-a-user" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>Users page
+   │
+   ▼
+POST /management/v1/users
+   │
+   ▼
+one-time raw API key returned
+   │
+   ▼
+user begins calling /v1/chat/completions
+</code></pre></div>
+
+<h3 id="52-link-a-telegram-user">5.2 Link a Telegram User<a class="headerlink" href="#52-link-a-telegram-user" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>Users page
+   │
+   ▼
+Create channel link token
+POST /management/v1/users/{user_id}/channels/link-token
+   │
+   ▼
+operator copies raw token
+   │
+   ▼
+Telegram user sends: /link &lt;token&gt;
+   │
+   ▼
+channel_user_links row is created
+</code></pre></div>
+
+<h3 id="53-diagnose-a-runtime-problem">5.3 Diagnose a Runtime Problem<a class="headerlink" href="#53-diagnose-a-runtime-problem" title="Permanent link">&para;</a></h3>
+<div class="codehilite"><pre><span></span><code>Overview or Providers page
+   │
+   ▼
+Observability page
+   │
+   ├─ query trace roots
+   ├─ query runtime log messages
+   └─ reconstruct one merged timeline by trace_id
+</code></pre></div>
+
+<h2 id="6-current-config-and-deployment-notes">6. Current Config and Deployment Notes<a class="headerlink" href="#6-current-config-and-deployment-notes" title="Permanent link">&para;</a></h2>
+<p>The dashboard and management plane rely on:</p>
+<ul>
+<li>block-based <code>codara.toml</code></li>
+<li>a built UI bundle under <code>ui/dist</code></li>
+<li>the management secret in <code>.env</code> or environment variables</li>
+</ul>
+<p>The dashboard does not require a separate backend service. It is served directly by the gateway.
+The gateway also provides a dashboard-scoped history fallback: extensionless <code>/dashboard/*</code> paths return <code>ui/dist/index.html</code> so browser refreshes on React Router pages continue to work. Missing dashboard asset paths still return 404s, and API paths such as <code>/management/v1/*</code> are not affected by the fallback.</p>
+<h2 id="7-known-boundaries">7. Known Boundaries<a class="headerlink" href="#7-known-boundaries" title="Permanent link">&para;</a></h2>
+<p>Current intentional boundaries:</p>
+<ul>
+<li>the dashboard surfaces real management actions instead of acting as a generic API console</li>
+<li>Observability is the primary log/trace debugging page; standalone Traces/Logs routes remain secondary</li>
+<li>only Telegram is fully implemented as a channel runtime today</li>
+</ul>
+              
+            </div>
+          </div><footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/codara/codara" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
