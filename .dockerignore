@@ -77,7 +77,6 @@ codara.toml
 *.log
 logs/
 data/
-workspaces/
 
 # Temporary files
 tmp/
