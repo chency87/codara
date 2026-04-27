@@ -603,6 +603,39 @@ class DatabaseManager:
             updated_at=self._row_to_datetime(row["updated_at"]),
         )
 
+    def list_session_tasks(self, session_id: str) -> List[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    task_id,
+                    session_id,
+                    workspace_id,
+                    user_id,
+                    prompt,
+                    status,
+                    result,
+                    created_at,
+                    updated_at
+                FROM tasks
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            ).fetchall()
+
+            items: list[dict] = []
+            for row in rows:
+                record = dict(row)
+                result = record.get("result")
+                if result:
+                    try:
+                        record["result"] = json.loads(result)
+                    except json.JSONDecodeError:
+                        record["result"] = None
+                items.append(record)
+            return items
+
     def get_session_turns(self, session_id: str) -> List[dict]:
         with self._get_connection() as conn:
             rows = conn.execute("""

@@ -36,7 +36,7 @@ export interface RuntimeLogRecord {
   request_id?: string | null;
   component?: string | null;
   event_name?: string | null;
-  attributes?: Record<string, any> | null;
+  attributes?: Record<string, unknown> | null;
   exception?: string | null;
 }
 
@@ -164,6 +164,29 @@ export interface SessionTurn {
   diff?: string | null;
   timestamp: number;
   finish_reason?: string | null;
+}
+
+export interface TurnResultRecord {
+  output: string;
+  backend_id: string;
+  finish_reason: string;
+  modified_files?: string[];
+  diff?: string | null;
+  actions?: Array<Record<string, unknown>>;
+  dirty?: boolean;
+  is_retry?: boolean;
+}
+
+export interface TaskRecord {
+  task_id: string;
+  session_id: string;
+  workspace_id: string;
+  user_id: string;
+  prompt: string;
+  status: string;
+  result?: TurnResultRecord | null;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface SessionListItem {
@@ -323,7 +346,7 @@ export interface TraceEvent {
   started_at: number;
   ended_at?: number | null;
   duration_ms?: number | null;
-  attributes?: Record<string, any> | null;
+  attributes?: Record<string, unknown> | null;
 }
 
 export interface TraceRecord {
@@ -337,7 +360,8 @@ export interface TraceRecord {
   started_at: number;
   ended_at: number;
   duration_ms: number;
-  attributes: Record<string, any>;
+  attributes: Record<string, unknown>;
+  events?: TraceEvent[];
 }
 
 export interface ObservabilityPruneResult {

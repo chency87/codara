@@ -106,14 +106,14 @@ const AuditLog = () => {
   }
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <header className="mb-8">
-        <h2 className="text-4xl font-black tracking-tight text-white mb-2">Audit Log</h2>
+        <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Audit Log</h2>
         <p className="text-slate-500 font-medium">Track all management actions and system changes.</p>
       </header>
 
-      <div className="mb-6 flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="relative flex-1 sm:max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
@@ -127,64 +127,68 @@ const AuditLog = () => {
           type="button"
           onClick={handleRefresh}
           disabled={isLoading}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:border-slate-600 transition-colors disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:border-slate-600 transition-colors disabled:opacity-50"
         >
           <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
           Refresh
         </button>
-        <div className="text-sm text-slate-500 ml-auto">
+        <div className="text-sm text-slate-500 sm:ml-auto">
           {pageMeta?.total_count ?? logs.length} entries
         </div>
       </div>
 
       <div className="bg-slate-900/40 border border-slate-800/60 rounded-3xl overflow-hidden">
-        <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-800/30 border-b border-slate-800/60 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-          <div className="col-span-2">Time</div>
-          <div className="col-span-2">Actor</div>
-          <div className="col-span-2">Action</div>
-          <div className="col-span-4">Target</div>
-          <div className="col-span-2 text-right">Changes</div>
-        </div>
+        <div className="overflow-x-auto custom-scrollbar">
+          <div className="min-w-[800px]">
+            <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-800/30 border-b border-slate-800/60 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              <div className="col-span-2">Time</div>
+              <div className="col-span-2">Actor</div>
+              <div className="col-span-2">Action</div>
+              <div className="col-span-4">Target</div>
+              <div className="col-span-2 text-right">Changes</div>
+            </div>
 
-        <div className="divide-y divide-slate-800/40 max-h-[600px] overflow-y-auto">
-          {isLoading ? (
-            <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs animate-pulse">
-              Loading...
+            <div className="divide-y divide-slate-800/40 max-h-[600px] overflow-y-auto">
+              {isLoading ? (
+                <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs animate-pulse">
+                  Loading...
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs">
+                  No audit entries
+                </div>
+              ) : (
+                logs.map((log) => (
+                  <div 
+                    key={log.audit_id}
+                    className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-white/[0.02] cursor-pointer transition-colors"
+                  >
+                    <div className="col-span-2 text-xs font-mono text-slate-400">
+                      {formatTime(log.timestamp)}
+                    </div>
+                    <div className="col-span-2">
+                      <ActorBadge actor={log.actor} />
+                    </div>
+                    <div className="col-span-2">
+                      <span className={`inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold uppercase border ${actionColor(log.action)}`}>
+                        {log.action}
+                      </span>
+                    </div>
+                    <div className="col-span-4">
+                      <span className="text-xs text-slate-400 font-mono">
+                        {log.target_type}:{log.target_id}
+                      </span>
+                    </div>
+                    <div className="col-span-2 text-right">
+                      <span className="text-[10px] text-slate-500">
+                        {log.before_state ? 'state changed' : 'new'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-          ) : logs.length === 0 ? (
-            <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs">
-              No audit entries
-            </div>
-          ) : (
-            logs.map((log) => (
-              <div 
-                key={log.audit_id}
-                className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-white/[0.02] cursor-pointer transition-colors"
-              >
-                <div className="col-span-2 text-xs font-mono text-slate-400">
-                  {formatTime(log.timestamp)}
-                </div>
-                <div className="col-span-2">
-                  <ActorBadge actor={log.actor} />
-                </div>
-                <div className="col-span-2">
-                  <span className={`inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold uppercase border ${actionColor(log.action)}`}>
-                    {log.action}
-                  </span>
-                </div>
-                <div className="col-span-4">
-                  <span className="text-xs text-slate-400 font-mono">
-                    {log.target_type}:{log.target_id}
-                  </span>
-                </div>
-                <div className="col-span-2 text-right">
-                  <span className="text-[10px] text-slate-500">
-                    {log.before_state ? 'state changed' : 'new'}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
+          </div>
         </div>
 
         <div className="px-6 py-4 border-t border-slate-800/60 flex items-center justify-between">

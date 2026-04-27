@@ -1,147 +1,40 @@
-# Codara System Guide
+# Codara Documentation
 
-Codara is a stateful gateway that lets OpenAI-compatible clients talk to CLI-native coding agents such as Codex, Gemini, and OpenCode while preserving session state, tracking workspace changes, and exposing an operator control plane.
+Codara is a high-performance, stateful gateway designed to bridge OpenAI-compatible clients with CLI-native coding agents (such as Codex, Gemini, and OpenCode). It preserves session state, tracks workspace changes, and provides a robust operator control plane.
 
-## 1. What Codara Does
+## Key Features
 
-Codara combines four responsibilities:
+- **OpenAI Compatibility**: Drop-in replacement for OpenAI SDKs at `POST /v1/chat/completions`.
+- **Session Persistence**: Reuses provider-side contexts across multiple turns via stable session IDs.
+- **Workspace Isolation**: Manages filesystem-level isolation for different users and tasks.
+- **Diff Tracking**: Automatically generates Git or hash-based diffs for every agent turn.
+- **Operator Control Plane**: Rich management APIs and a React-based dashboard for monitoring and debugging.
+- **Multi-Channel Support**: Native integration with communication channels like Telegram.
 
-1. It exposes an OpenAI-compatible inference entry point at `POST /v1/chat/completions`.
-2. It persists provider session state so repeated turns can reuse context.
-3. It tracks workspaces, tasks, diffs, and activity across users and sessions.
-4. It exposes a management plane and dashboard for operators.
+## System Sections
 
-## 2. Product Surface
+### [Architecture](./architecture.md)
+Deep dive into the runtime components, data flow, and how the gateway orchestrates requests.
 
-The current runtime has three ingress families:
+### [Core Concepts](./concepts.md)
+Detailed explanation of Workspaces, Sessions, Tasks, and the Provider Adapter model.
 
-- **Inference API**
-  - Direct/operator use through `POST /v1/chat/completions`
-  - Provisioned-user use through the same endpoint with a user API key
-- **Channel ingress**
-  - Telegram-first support through `/channels/telegram/{bot_name}/webhook` or polling mode
-- **Management plane**
-  - `/management/v1/*` APIs
-  - `/dashboard` React UI
+### [API Reference](./management-api.md)
+Documentation for the Inference API and the Management API.
 
-## 3. Runtime Architecture
+### [Channels](./channel-design.md)
+How Codara integrates with Telegram and other messaging platforms.
 
-```text
-                         ┌─────────────────────────────┐
-                         │        API Clients          │
-                         │ OpenAI SDKs / curl / apps   │
-                         └──────────────┬──────────────┘
-                                        │
-                         ┌──────────────▼──────────────┐
-                         │      FastAPI Gateway        │
-                         │ auth, request shaping,      │
-                         │ management API, dashboard   │
-                         └───────┬───────────┬─────────┘
-                                 │           │
-                  ┌──────────────▼───┐   ┌──▼────────────────┐
-                  │ InferenceService │   │ Channel Adapters   │
-                  │ user-bound turn  │   │ Telegram webhook / │
-                  │ execution        │   │ polling ingress    │
-                  └──────────────┬───┘   └──────────┬─────────┘
-                                 │                  │
-                                 └────────┬─────────┘
-                                          │
-                                ┌─────────▼─────────┐
-                                │   Orchestrator    │
-                                │ session locks,    │
-                                │ tasks, concurrency│
-                                └───────┬─────┬─────┘
-                                        │     │
-                     ┌──────────────────▼┐   ┌▼──────────────────┐
-                     │ Provider Adapters │   │ Workspace Engine   │
-                     │ Codex / Gemini /  │   │ git or hash diffs, │
-                     │ OpenCode CLIs     │   │ locks, snapshots   │
-                     └─────────┬─────────┘   └─────────┬──────────┘
-                               │                       │
-                ┌──────────────▼──────────────┐  ┌────▼─────────────┐
-                │ SQLite Persistence          │  │ File-backed logs │
-                │ users, workspaces,          │  │ and trace shards │
-                │ sessions, tasks, audit      │  │ runtime + traces │
-                └─────────────────────────────┘  └──────────────────┘
-```
+### [Observability](./observability.md)
+Understanding traces, logs, and the system audit trail.
 
-## 4. Core Execution Workflows
+### [Deployment & Configuration](./deployment.md)
+Guide for Docker-based deployment and `codara.toml` configuration.
 
-### 4.1 Provisioned User Request
+---
 
-Provisioned-user requests are the primary product path.
+## Quick Navigation
 
-```text
-User API Key
-   │
-   ▼
-Gateway validates key and loads user/api_key
-   │
-   ▼
-InferenceService resolves workspace_id
-   │
-   ▼
-Orchestrator binds request to Task and Session
-   │
-   ▼
-Adapter executes CLI turn
-   │
-   ▼
-Workspace diff + ATR extraction
-   │
-   ▼
-Session and task state persisted
-   │
-   ▼
-OpenAI-compatible response + Codara extensions
-```
-
-## 5. State Model
-
-### 5.1 Sessions
-
-Codara persists session metadata in SQLite so provider-local `backend_id` values survive across requests and restarts. Sessions are bound to a specific Workspace.
-
-### 5.2 Workspaces
-
-Workspaces are first-class entities in Codara. They represent a managed directory on the file system where an agent operates.
-
-- provisioned users can have multiple workspaces.
-- each workspace is initialized with a template layout.
-- the workspace engine uses git metadata when available and falls back to recursive hash comparison otherwise.
-
-### 5.3 Tasks
-
-Every request to the inference API is tracked as a `Task`. Tasks belong to a `Session` and provide a detailed audit trail of individual agent turns, including their prompts, statuses, and results.
-
-## 6. Configuration Model
-
-Runtime configuration is block-based in `codara.toml`.
-
-Key sections:
-- `[server]`
-- `[database]`
-- `[workspace]`
-- `[logging]`
-- `[providers.codex]`
-- `[providers.gemini]`
-- `[providers.opencode]`
-
-## 7. Management Plane
-
-The dashboard live pages are:
-- Overview
-- Agent Playground
-- Active Sessions
-- Workspaces
-- Users
-- Providers
-- Observability
-- Audit Logs
-
-## 8. Document Map
-
-- [README.md](../README.md) for install, config, and operator quickstart
-- [api-dashboard.md](./api-dashboard.md) for management APIs and dashboard workflows
-- [channel-design.md](./channel-design.md) for Telegram and channel-layer behavior
-- [architecture.md](./architecture.md) for a concise internal component map
+- [Installation & Quickstart](../README.md)
+- [Project Layout](../SUMMARY.md)
+- [Agent Workflow Guide](../AGENTS.md)

@@ -79,13 +79,13 @@ const Providers = () => {
   const totalSessions = providers.reduce((sum, item) => sum + (item.active_sessions || 0), 0);
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="text-4xl font-black tracking-tight text-white mb-2">Provider Control</h2>
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
+      <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex-1">
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Provider Control</h2>
           <p className="text-slate-500 font-medium">Provider health, local runtime readiness, and model inventory.</p>
         </div>
-        <div className="grid grid-cols-1 gap-3 text-center">
+        <div className="flex justify-start lg:justify-center">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-5 py-4 min-w-[120px]">
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Sessions</div>
             <div className="mt-1 text-2xl font-black text-white">{totalSessions}</div>
@@ -96,7 +96,7 @@ const Providers = () => {
       {isLoading ? (
         <div className="text-slate-500 font-bold uppercase tracking-widest text-xs animate-pulse">Loading providers…</div>
       ) : (
-        <div className="grid grid-cols-1 gap-8 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
           {providers.map((provider) => (
             <ProviderCard key={provider.provider} provider={provider} />
           ))}

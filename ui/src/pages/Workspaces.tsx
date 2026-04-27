@@ -55,23 +55,23 @@ const Workspaces = () => {
   }
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="text-4xl font-black tracking-tight text-white mb-2">Workspace Management</h2>
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex-1">
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Workspace Management</h2>
           <p className="text-slate-500 font-medium">Inspect provisioned workspaces, git state, bound users, and bound sessions.</p>
         </div>
-        <div className="w-full max-w-sm">
+        <div className="w-full lg:max-w-sm">
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search by path, scope, or owner"
-            className="w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-500"
+            className="w-full rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50"
           />
         </div>
       </header>
 
-      <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-3xl border border-slate-800 bg-slate-900/40 p-6">
           <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">Workspaces</div>
           <div className="text-3xl font-black text-white">{totals.total}</div>

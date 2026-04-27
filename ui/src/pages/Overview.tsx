@@ -49,13 +49,13 @@ const Overview = () => {
   const releaseCheck = version.release_check || {};
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-8">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-4xl font-black tracking-tight text-white mb-2">System Overview</h2>
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">System Overview</h2>
           <p className="text-slate-500 font-medium">Essential runtime, session, provider, and operator activity signals from the live control plane.</p>
         </div>
-        <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-widest ${statusClass(health.status)}`}>
+        <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black uppercase tracking-widest self-start lg:self-auto ${statusClass(health.status)}`}>
           <ShieldCheck size={14} />
           {health.status || 'unknown'}
         </div>

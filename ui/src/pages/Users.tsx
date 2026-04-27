@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { Copy, KeyRound, Plus, RefreshCw, UserCog, Users as UsersIcon, X } from 'lucide-react';
+import { Copy, KeyRound, Plus, UserCog, Users as UsersIcon, X } from 'lucide-react';
 import type {
   ChannelLinkTokenResponse,
   CreateUserResponse,
@@ -17,8 +17,6 @@ const badgeClass = (status: string) => {
   if (status === 'suspended') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
   return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
 };
-
-const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
 const copyToClipboard = async (value: string) => {
   if (navigator.clipboard?.writeText) {
@@ -42,8 +40,8 @@ const Users = () => {
   const [revealedKeyUserId, setRevealedKeyUserId] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedKeyTarget, setCopiedKeyTarget] = useState<string | null>(null);
-  const [channelExpiry, setChannelExpiry] = useState(30);
-  const [channelBotName, setChannelBotName] = useState('codara-bot');
+  const [channelExpiry] = useState(30);
+  const [channelBotName] = useState('codara-bot');
   const [revealedChannelToken, setRevealedChannelToken] = useState<ChannelLinkTokenResponse | null>(null);
   const [copiedChannelToken, setCopiedChannelToken] = useState(false);
   const [channelFeedback, setChannelFeedback] = useState<string | null>(null);
@@ -170,22 +168,22 @@ const Users = () => {
   );
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="mb-12 flex justify-between items-end">
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <header className="mb-12 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
         <div>
-          <h2 className="text-4xl font-black tracking-tight text-white mb-2">User Management</h2>
+          <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">User Management</h2>
           <p className="text-slate-500 font-medium">Provision users, enforce one active API key, and inspect active sessions.</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="group flex items-center space-x-2 bg-white text-black hover:bg-blue-500 hover:text-white px-6 py-3 rounded-2xl transition-all duration-300 font-bold text-sm shadow-xl shadow-white/5"
+          className="group flex items-center justify-center space-x-2 bg-white text-black hover:bg-blue-500 hover:text-white px-6 py-3 rounded-2xl transition-all duration-300 font-bold text-sm shadow-xl shadow-white/5 self-start sm:self-auto w-full sm:w-auto"
         >
           <Plus size={18} className="group-hover:rotate-90 transition-transform duration-300" />
           <span>Provision User</span>
         </button>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6">
           <div className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-2">Users</div>
           <div className="text-3xl font-black text-white">{users?.length || 0}</div>
@@ -317,7 +315,7 @@ const Users = () => {
       )}
 
       {revealedKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
           <div className="w-full max-w-2xl rounded-3xl border border-emerald-500/20 bg-slate-950 p-8 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>

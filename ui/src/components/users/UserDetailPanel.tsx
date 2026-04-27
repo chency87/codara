@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import axios from 'axios';
-import { Copy, KeyRound, RefreshCw, X } from 'lucide-react';
+import { Copy, RefreshCw, X } from 'lucide-react';
 import type {
   ChannelLinkTokenResponse,
   UserActivityRecord,
@@ -32,12 +30,6 @@ interface UserDetailPanelProps {
   onCopyKey: (keyId: string) => void;
   onCopyChannelToken: () => void;
 }
-
-const badgeClass = (status: string) => {
-  if (status === 'active') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-  if (status === 'suspended') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-  return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-};
 
 const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
@@ -84,7 +76,7 @@ export const UserDetailPanel = ({
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full max-w-2xl bg-slate-950 border-l border-slate-800 shadow-2xl z-50 overflow-auto">
+    <div className="absolute inset-y-0 right-0 w-full max-w-2xl bg-slate-950 border-l border-slate-800 shadow-2xl z-50 overflow-auto">
       <div className="p-8 border-b border-slate-800 flex justify-between items-start">
         <div>
           <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">User Detail</div>

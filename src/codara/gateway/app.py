@@ -1191,9 +1191,9 @@ def _user_summary_map(user_ids: list[str]) -> dict[str, dict]:
 
 def _page_meta(items: list, cursor_field: str) -> dict:
     if not items:
-        return {"next_cursor": None, "has_more": False}
+        return {"cursor": None, "has_more": False}
     return {
-        "next_cursor": items[-1].get(cursor_field) if isinstance(items[-1], dict) else getattr(items[-1], cursor_field, None),
+        "cursor": items[-1].get(cursor_field) if isinstance(items[-1], dict) else getattr(items[-1], cursor_field, None),
         "has_more": len(items) > 0,
     }
 
@@ -2241,6 +2241,22 @@ async def list_cli_runs(
     return envelope(runs)
 
 
+@management_router.get(
+    "/sessions/{session_id}/cli-runs",
+    tags=[TAG_MANAGEMENT_OBSERVABILITY],
+    summary="List captured CLI runs for a session",
+    include_in_schema=False,
+)
+async def list_cli_runs_for_session(
+    session_id: str,
+    provider: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 25,
+):
+    runs = _cli_run_store().list_runs(session_id=session_id, provider=provider, status=status, limit=limit)
+    return envelope(runs)
+
+
 @management_router.get("/sessions/{session_id}", tags=[TAG_MANAGEMENT_SESSIONS], summary="Get a session")
 async def get_session(session_id: str):
     session = db_manager.get_session(session_id)
@@ -2253,6 +2269,12 @@ async def get_session(session_id: str):
 async def get_turns(session_id: str):
     turns = db_manager.get_session_turns(session_id)
     return envelope(turns)
+
+
+@management_router.get("/sessions/{session_id}/tasks", tags=[TAG_MANAGEMENT_SESSIONS], summary="List tasks for a session")
+async def list_session_tasks(session_id: str):
+    tasks = db_manager.list_session_tasks(session_id)
+    return envelope(tasks)
 
 @management_router.delete("/sessions/{session_id}", tags=[TAG_MANAGEMENT_SESSIONS], summary="Delete a session")
 async def terminate_session(session_id: str, current_operator: dict = Depends(get_current_operator)):
@@ -2404,7 +2426,7 @@ async def list_traces(
         until=_to_ms(until),
         search=search,
     )
-    return envelope(traces, meta=_page_meta(traces, "trace_id"))
+    return envelope(traces, meta=_page_meta(traces, "started_at"))
 
 
 @management_router.get("/observability/traces/{trace_id}", tags=[TAG_MANAGEMENT_OBSERVABILITY], summary="Get a trace")

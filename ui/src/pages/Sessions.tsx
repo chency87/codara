@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { Terminal, Search, Filter, Clock, User, FolderCode } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Terminal, Search } from 'lucide-react';
 import CursorPagination from '../components/CursorPagination';
 import type { ApiEnvelope, SessionListItem } from '../types/api';
 import { dashboardPollHeaders } from '../api/dashboardPoll';
-import { SessionCard, SessionDrawer } from '../components/sessions';
+import { SessionCard } from '../components/sessions';
 
 const PAGE_SIZE = 25;
 
@@ -31,7 +32,7 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 
 const Sessions = () => {
   const queryClient = useQueryClient();
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [copied, setCopied] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([]);
@@ -75,7 +76,6 @@ const Sessions = () => {
     mutationFn: (id: string) => axios.delete(`/management/v1/sessions/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      setSelectedSession(null);
     }
   });
 
@@ -113,14 +113,14 @@ const Sessions = () => {
   const dirtyCount = sessions.filter(s => String(s.status || '').toLowerCase() === 'dirty').length;
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <header className="mb-8">
-        <h2 className="text-4xl font-black tracking-tight text-white mb-2">Sessions</h2>
+        <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Sessions</h2>
         <p className="text-slate-500 font-medium">Monitor and manage active CLI sessions.</p>
       </header>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2">
+      <div className="mb-6 flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 self-start">
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
             <span className="text-sm font-semibold text-blue-400">{activeCount}</span>
@@ -137,33 +137,35 @@ const Sessions = () => {
           </div>
         </div>
 
-        <div className="flex-1" />
+        <div className="lg:flex-1" />
 
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sessions..."
-            className="w-64 pl-9 pr-4 py-2 bg-slate-900/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50"
-          />
-        </div>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative flex-1 sm:flex-none">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search sessions..."
+              className="w-full sm:w-64 pl-9 pr-4 py-2 bg-slate-900/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50"
+            />
+          </div>
 
-        <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-xl p-1">
-          {STATUS_OPTIONS.map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => setStatusFilter(value)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                statusFilter === value
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-800 rounded-xl p-1 overflow-x-auto custom-scrollbar">
+            {STATUS_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setStatusFilter(value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  statusFilter === value
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -191,11 +193,11 @@ const Sessions = () => {
               <SessionCard
                 key={session.client_session_id}
                 session={session}
-                isSelected={selectedSession === session.client_session_id}
+                isSelected={false}
                 copied={copied === session.client_session_id}
                 onCopy={() => copyId(session.client_session_id)}
                 onTerminate={() => terminateMutation.mutate(session.client_session_id)}
-                onOpen={() => setSelectedSession(session.client_session_id)}
+                onOpen={() => navigate(`/sessions/${encodeURIComponent(session.client_session_id)}/history`)}
               />
             ))}
           </div>
@@ -217,9 +219,6 @@ const Sessions = () => {
         </div>
       </div>
 
-      {selectedSession && (
-        <SessionDrawer sessionId={selectedSession} onClose={() => setSelectedSession(null)} />
-      )}
     </div>
   );
 };
