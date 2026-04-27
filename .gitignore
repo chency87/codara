@@ -26,7 +26,7 @@ target/
 site/
 
 logs/
-workspaces/
+/workspaces/
 runtime/
 traces/
 codara.db
@@ -39,4 +39,3 @@ configs/data/
 configs/*.db
 
 .egg-info/
-
