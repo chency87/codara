@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from codara.logging_setup import configure_logging
-from codara.telemetry import start_trace
+from amesh.logging_setup import configure_logging
+from amesh.telemetry import start_trace
 
 
 def test_configure_logging_creates_rotating_log_file(tmp_path):
@@ -20,7 +20,7 @@ def test_configure_logging_creates_rotating_log_file(tmp_path):
 
     log_path = configure_logging(settings, force=True)
     with start_trace("logging.test", component="tests.logging"):
-        logging.getLogger("codara.tests").info("hello centralized log")
+        logging.getLogger("amesh.tests").info("hello centralized log")
 
     assert log_path == (tmp_path / "logs" / "runtime").resolve()
     shard_files = sorted(log_path.glob("**/*.jsonl"))
@@ -48,7 +48,7 @@ def test_configure_logging_is_idempotent_for_same_path(tmp_path):
 
     managed_file_handlers = [
         handler
-        for handler in logging.getLogger("codara").handlers
+        for handler in logging.getLogger("amesh").handlers
         if handler.__class__.__name__ in {"RotatingFileHandler", "DatetimeShardedFileHandler"}
     ]
 

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
+import amesh.gateway.app as gateway_app
 
 
 def test_dashboard_spa_route_falls_back_to_index_for_browser_refresh(tmp_path, monkeypatch):

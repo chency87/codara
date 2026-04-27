@@ -1,13 +1,13 @@
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.core.models import TurnResult
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
+import amesh.gateway.app as gateway_app
+from amesh.core.models import TurnResult
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
 
 
 def test_openapi_groups_routes_by_module(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -34,7 +34,7 @@ def test_openapi_groups_routes_by_module(tmp_path, monkeypatch):
     assert schema["paths"]["/v1/user/keys"]["get"]["security"] == [{"User API Key": []}]
     assert schema["paths"]["/v1/user/sessions"]["get"]["security"] == [{"User API Key": []}]
 def test_chat_completions_requires_authorization(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
     gateway_app.settings.secret_key = "unit-test-secret"
@@ -57,7 +57,7 @@ def test_chat_completions_requires_authorization(tmp_path, monkeypatch):
 
 
 def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
     workspace = workspaces_root / "project-a"
     workspace.mkdir(parents=True)
@@ -95,7 +95,7 @@ def test_chat_completions_allows_direct_workspace_inside_safe_zone(tmp_path, mon
 
 
 def test_chat_completions_rejects_direct_workspace_outside_safe_zone(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -124,7 +124,7 @@ def test_chat_completions_rejects_direct_workspace_outside_safe_zone(tmp_path, m
 
 
 def test_chat_completions_rejects_operator_workspace_traversal_outside_safe_zone(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
     allowed_parent = workspaces_root / "team-a"
     allowed_parent.mkdir(parents=True)
@@ -156,7 +156,7 @@ def test_chat_completions_rejects_operator_workspace_traversal_outside_safe_zone
 
 
 def test_chat_completions_still_accepts_legacy_uag_options_wrapper(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
     workspace = workspaces_root / "project-a"
     workspace.mkdir(parents=True)

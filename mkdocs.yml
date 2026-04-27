@@ -1,7 +1,7 @@
-site_name: Codara
+site_name: amesh
 site_description: Unified Agent Gateway (UAG) - Bridge stateless API clients with stateful CLI agents
-site_url: https://github.com/codara/codara
-repo_url: https://github.com/codara/codara
+site_url: https://github.com/amesh/amesh
+repo_url: https://github.com/amesh/amesh
 
 theme:
   name: readthedocs
@@ -34,4 +34,4 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/codara/codara
+      link: https://github.com/amesh/amesh

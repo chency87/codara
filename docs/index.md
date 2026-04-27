@@ -1,6 +1,6 @@
-# Codara Documentation
+# Ameshe Documentation
 
-Codara is a high-performance, stateful gateway designed to bridge OpenAI-compatible clients with CLI-native coding agents (such as Codex, Gemini, and OpenCode). It preserves session state, tracks workspace changes, and provides a robust operator control plane.
+Ameshe is a high-performance, stateful gateway designed to bridge OpenAI-compatible clients with CLI-native coding agents (such as Codex, Gemini, and OpenCode). It preserves session state, tracks workspace changes, and provides a robust operator control plane.
 
 ## Key Features
 
@@ -29,7 +29,7 @@ How Codara integrates with Telegram and other messaging platforms.
 Understanding traces, logs, and the system audit trail.
 
 ### [Deployment & Configuration](./deployment.md)
-Guide for Docker-based deployment and `codara.toml` configuration.
+Guide for Docker-based deployment and `amesh.toml` configuration.
 
 ---
 

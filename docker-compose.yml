@@ -1,5 +1,5 @@
 services:
-  codara:
+  amesh:
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,19 +10,19 @@ services:
         PNPM_PACKAGE: ${PNPM_PACKAGE:-pnpm@latest}
         NODE_VERSION: ${NODE_VERSION:-24}
         NVM_VERSION: ${NVM_VERSION:-0.40.3}
-    image: ${CODARA_IMAGE:-codara:latest}
-    container_name: ${CODARA_CONTAINER_NAME:-codara}
+    image: ${amesh_IMAGE:-amesh:latest}
+    container_name: ${amesh_CONTAINER_NAME:-amesh}
     restart: unless-stopped
     ports:
-      - "${CODARA_HTTP_PORT:-5173}:5173"
+      - "${amesh_HTTP_PORT:-5173}:5173"
       
     volumes:
-      # - codara_data:/data
-      # - codara_config:/config
-      # - codara_logs:/logs
-      # - codara_workspaces:/workspaces
+      # - amesh_data:/data
+      # - amesh_config:/config
+      # - amesh_logs:/logs
+      # - amesh_workspaces:/workspaces
       - ./workspaces:/workspaces
-      - ./configs/codara.toml:/config/codara.toml:ro
+      - ./configs/amesh.toml:/config/amesh.toml:ro
     
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/management/v1/health"]
@@ -31,8 +31,8 @@ services:
       retries: 3
       start_period: 20s
     networks:
-      - codara
+      - amesh
 
 networks:
-  codara:
+  amesh:
     driver: bridge

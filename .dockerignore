@@ -60,7 +60,7 @@ Dockerfile*
 .env
 .env.*
 !.env.example
-codara.toml
+amesh.toml
 
 # Local provider/session state
 .codex/
@@ -85,5 +85,5 @@ temp/
 
 # Agent data (should be in volumes)
 .agents/
-codara.db
+amesh.db
 *.db-journal

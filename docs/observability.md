@@ -15,7 +15,7 @@ Codara captures detailed execution traces for every request.
 
 Codara employs a multi-tiered logging strategy:
 
-- **System Logs**: High-level application events (starting services, auth failures) written to standard output and `logs/codara.log`.
+- **System Logs**: High-level application events (starting services, auth failures) written to standard output and `logs/amesh.log`.
 - **Runtime Logs**: Transactional logs for individual agent turns, capturing specific logic branching within the Orchestrator.
 - **CLI Capture**: Full capture of `stdout` and `stderr` from the provider CLIs (Gemini, Codex, etc.). These are stored in `logs/cli-runs/` and are crucial for debugging "stalled" or failed agent executions.
 

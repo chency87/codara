@@ -176,7 +176,7 @@ Observability page
 
 The dashboard and management plane rely on:
 
-- block-based `codara.toml`
+- block-based `amesh.toml`
 - a built UI bundle under `ui/dist`
 - the management secret in `.env` or environment variables
 

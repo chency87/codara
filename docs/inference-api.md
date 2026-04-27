@@ -61,7 +61,7 @@ In addition to standard OpenAI fields, Codara returns several extension fields:
 ## 4. Model Aliases
 
 You can use explicit provider models (e.g., `gpt-5-codex`) or `uag-*` aliases.
-Aliases resolve to the default models configured in `codara.toml`.
+Aliases resolve to the default models configured in `amesh.toml`.
 
 To list available models:
 - **User**: `GET /v1/user/providers/models` (requires User API Key)

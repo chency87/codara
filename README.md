@@ -1,6 +1,6 @@
-# Codara: Unified Agent Gateway (UAG)
+# amesh: Agent Mesh Runtime for ACP & CLI Agents
 
-Codara is a high-performance, stateful gateway that bridges OpenAI-compatible clients with CLI-native agents like Codex, Gemini, and OpenCode. It reuses session state, manages isolated workspaces, and provides an operator dashboard.
+amesh is a high-performance, stateful gateway that bridges OpenAI-compatible clients with CLI-native agents like Codex, Gemini, and OpenCode. It reuses session state, manages isolated workspaces, and provides an operator dashboard.
 
 ## Key Features
 
@@ -31,7 +31,7 @@ pip install -e .
 ### 2. Configure
 
 ```bash
-cp configs/codara.toml.example codara.toml
+cp configs/amesh.toml.example amesh.toml
 cp configs/.env.example .env
 # Edit .env and set your API_TOKEN
 ```
@@ -40,7 +40,7 @@ cp configs/.env.example .env
 
 ```bash
 # Start the backend gateway
-codara serve --port 8000
+amesh serve --port 8000
 
 # (Optional) Build and serve the dashboard
 cd ui && npm install && npm run build

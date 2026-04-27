@@ -93,7 +93,7 @@ mention_only = false
 api_base = "https://api.telegram.org"
 
 [[channels.telegram.bots]]
-name = "codara-bot"
+name = "amesh-bot"
 enabled = true
 token = "..."
 webhook_secret = "..."
@@ -151,7 +151,7 @@ Codara also registers Telegram bot commands at startup via `setMyCommands`.
 
 Project commands are scoped to the linked user's base workspace. For example,
 `/project_create news-pulse python` creates `<user-workspace>/news-pulse`,
-initializes the Python project layout, writes `.codara/project.toml`, and
+initializes the Python project layout, writes `.amesh/project.toml`, and
 switches the conversation workspace to `news-pulse`.
 
 ## 7. Link Flow

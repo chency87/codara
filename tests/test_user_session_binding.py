@@ -1,9 +1,9 @@
-from codara.core.models import TurnResult
+from amesh.core.models import TurnResult
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
 
 
@@ -35,7 +35,7 @@ def _provision_user(client: TestClient, headers: dict, email: str, display_name:
 
 
 def test_user_key_request_persists_session_owner_and_key_binding(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -72,7 +72,7 @@ def test_user_key_request_persists_session_owner_and_key_binding(tmp_path, monke
 
 
 def test_management_views_expose_bound_user_sessions_and_activity(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")

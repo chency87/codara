@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.core.models import ProviderType, Session, SessionStatus, Task, TurnResult, User, UserStatus, Workspace
-from codara.database.manager import DatabaseManager
+import amesh.gateway.app as gateway_app
+from amesh.core.models import ProviderType, Session, SessionStatus, Task, TurnResult, User, UserStatus, Workspace
+from amesh.database.manager import DatabaseManager
 from tests.helpers import operator_headers
 
 
@@ -13,7 +13,7 @@ def test_management_session_tasks_lists_prompt_and_result(tmp_path, monkeypatch)
     gateway_app.settings.secret_key = "unit-test-secret"
     gateway_app.clear_auth_caches()
 
-    gateway_app.db_manager = DatabaseManager(str(tmp_path / "codara.db"))
+    gateway_app.db_manager = DatabaseManager(str(tmp_path / "amesh.db"))
 
     now = datetime.now(timezone.utc)
     user = User(

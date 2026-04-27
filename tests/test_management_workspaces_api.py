@@ -1,17 +1,17 @@
-from codara.core.models import Session, ProviderType, SessionStatus
+from amesh.core.models import Session, ProviderType, SessionStatus
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.workspace.engine import WorkspaceEngine
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.workspace.engine import WorkspaceEngine
 from tests.helpers import operator_headers
 
 
 def _setup_workspace_api(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -42,7 +42,7 @@ def _setup_workspace_api(tmp_path, monkeypatch):
     if not workspaces:
         # If not found (e.g. if the API didn't create a DB record for it yet in v2 sense, 
         # though create_user should have), we can create one manually for the test.
-        from codara.core.models import Workspace
+        from amesh.core.models import Workspace
         workspace_id = "wsk-base"
         gateway_app.db_manager.save_workspace(Workspace(
             workspace_id=workspace_id,
@@ -62,7 +62,7 @@ def _setup_workspace_api(tmp_path, monkeypatch):
 
     # For the subworkspace, we also need a Workspace record in DB
     sub_workspace_id = "wsk-sub"
-    from codara.core.models import Workspace
+    from amesh.core.models import Workspace
     gateway_app.db_manager.save_workspace(Workspace(
         workspace_id=sub_workspace_id,
         name="project-a",

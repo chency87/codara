@@ -9,7 +9,7 @@
 - Run the full Python test suite: `pytest -q`
 - Run one test file: `pytest -q tests/test_account_pool.py`
 - Run one test case: `pytest -q tests/test_account_pool.py::test_cli_primary_falls_back_when_headroom_is_nearly_exhausted`
-- Start the API gateway and dashboard: `codara serve --port 8000`
+- Start the API gateway and dashboard: `amesh serve --port 8000`
 
 ### Dashboard (`ui/`)
 
@@ -20,17 +20,17 @@
 
 ## High-level architecture
 
-- `src/codara/gateway/app.py` is the main entrypoint. It exposes:
+- `src/amesh/gateway/app.py` is the main entrypoint. It exposes:
   - OpenAI-compatible inference at `/v1/chat/completions`
   - operator management APIs under `/management/v1/*`
   - user self-service APIs under `/v1/user/*`
   - token issuance and user/operator auth handling
-- `src/codara/orchestrator/engine.py` is the runtime coordinator. A request flows through session lookup, workspace setup, account selection, adapter dispatch, workspace diffing, turn persistence, and usage accounting.
-- `src/codara/database/manager.py` is the SQLite source of truth. It owns schema creation and CRUD for accounts, sessions, audit logs, turns, users, API keys, and workspace resets.
-- `src/codara/accounts/pool.py` manages registered provider credentials. It selects accounts by readiness/quota headroom, stores encrypted credentials in SQLite plus the local vault, and materializes the selected credential into provider CLI auth paths when needed.
-- `src/codara/accounts/monitor.py` refreshes account usage and token state by delegating to provider adapters, then writes the results back into the account records.
-- Provider-specific behavior lives in `src/codara/adapters/`. The orchestrator talks to adapters through a shared interface; adapters translate between the UAG session model and the provider CLI/runtime protocol.
-- `src/codara/workspace/engine.py` treats the workspace as part of runtime state. It snapshots file trees, acquires a `.uag_lock`, and generates diffs via git or file hashing.
+- `src/amesh/orchestrator/engine.py` is the runtime coordinator. A request flows through session lookup, workspace setup, account selection, adapter dispatch, workspace diffing, turn persistence, and usage accounting.
+- `src/amesh/database/manager.py` is the SQLite source of truth. It owns schema creation and CRUD for accounts, sessions, audit logs, turns, users, API keys, and workspace resets.
+- `src/amesh/accounts/pool.py` manages registered provider credentials. It selects accounts by readiness/quota headroom, stores encrypted credentials in SQLite plus the local vault, and materializes the selected credential into provider CLI auth paths when needed.
+- `src/amesh/accounts/monitor.py` refreshes account usage and token state by delegating to provider adapters, then writes the results back into the account records.
+- Provider-specific behavior lives in `src/amesh/adapters/`. The orchestrator talks to adapters through a shared interface; adapters translate between the UAG session model and the provider CLI/runtime protocol.
+- `src/amesh/workspace/engine.py` treats the workspace as part of runtime state. It snapshots file trees, acquires a `.uag_lock`, and generates diffs via git or file hashing.
 - The React dashboard in `ui/` is a first-party client of the management API. It does not have a separate backend.
 
 ## Key conventions

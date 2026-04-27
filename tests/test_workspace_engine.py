@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
 
-from codara.workspace.engine import WorkspaceEngine
+from amesh.workspace.engine import WorkspaceEngine
 
 
 def test_workspace_engine_ignores_internal_runtime_artifacts(tmp_path):

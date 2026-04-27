@@ -8,16 +8,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-import codara.adapters.base as base_adapter_module
-import codara.adapters.codex as codex_adapter_module
-from codara.adapters.codex import CodexAdapter
-from codara.adapters.gemini import GeminiAdapter
-from codara.adapters.opencode import OpenCodeAdapter
-import codara.adapters.gemini as gemini_adapter_module
-import codara.adapters.opencode as opencode_adapter_module
-from codara.config import get_settings
-from codara.core.models import Message, Session, TurnResult, ProviderType, SessionStatus
-from codara.database.manager import DatabaseManager
+import amesh.adapters.base as base_adapter_module
+import amesh.adapters.codex as codex_adapter_module
+from amesh.adapters.codex import CodexAdapter
+from amesh.adapters.gemini import GeminiAdapter
+from amesh.adapters.opencode import OpenCodeAdapter
+import amesh.adapters.gemini as gemini_adapter_module
+import amesh.adapters.opencode as opencode_adapter_module
+from amesh.config import get_settings
+from amesh.core.models import Message, Session, TurnResult, ProviderType, SessionStatus
+from amesh.database.manager import DatabaseManager
 
 class SilentReader:
     async def read(self, size=-1):
