@@ -171,4 +171,4 @@ EXPOSE 8000
 
 # Use tini as init and start the server
 ENTRYPOINT ["tini", "--"]
-CMD ["codara", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["codara", "dev", "--host", "0.0.0.0", "--port", "8000"]

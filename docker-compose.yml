@@ -14,38 +14,16 @@ services:
     container_name: ${CODARA_CONTAINER_NAME:-codara}
     restart: unless-stopped
     ports:
-      - "${CODARA_HTTP_PORT:-8000}:8000"
-    environment:
-      UAG_HOST: 0.0.0.0
-      UAG_PORT: 8000
-      UAG_DEBUG: ${UAG_DEBUG:-false}
-
-      UAG_CONFIG_PATH: /config/codara.toml
-      UAG_CONFIG_DIR: /config
-      UAG_DATABASE_PATH: /data/codara.db
-      UAG_WORKSPACES_ROOT: /workspaces
-      UAG_LOGS_ROOT: /logs
-
-      API_TOKEN: ${API_TOKEN:-change-me-before-production}
-
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-
-      UAG_CODEX_STALL_TIMEOUT_SECONDS: ${UAG_CODEX_STALL_TIMEOUT_SECONDS:-600}
-      UAG_GEMINI_STALL_TIMEOUT_SECONDS: ${UAG_GEMINI_STALL_TIMEOUT_SECONDS:-600}
-      UAG_OPENCODE_STALL_TIMEOUT_SECONDS: ${UAG_OPENCODE_STALL_TIMEOUT_SECONDS:-600}
-
-      UAG_RELEASE_CHECK_ENABLED: ${UAG_RELEASE_CHECK_ENABLED:-false}
+      - "${CODARA_HTTP_PORT:-5173}:5173"
+      
     volumes:
-      - codara_data:/data
-      - codara_config:/config
-      - codara_logs:/logs
-      - codara_workspaces:/workspaces
-      # Map the example config if the real one is missing, 
-      # but in a real deployment user should provide their own codara.toml
-      - ./configs/codara.toml.example:/config/codara.toml:ro
-    depends_on:
-      redis:
-        condition: service_healthy
+      # - codara_data:/data
+      # - codara_config:/config
+      # - codara_logs:/logs
+      # - codara_workspaces:/workspaces
+      - ./workspaces:/workspaces
+      - ./configs/codara.toml:/config/codara.toml:ro
+    
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/management/v1/health"]
       interval: 30s
@@ -54,29 +32,6 @@ services:
       start_period: 20s
     networks:
       - codara
-
-  redis:
-    image: redis:7-alpine
-    container_name: ${CODARA_REDIS_CONTAINER_NAME:-codara-redis}
-    restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    networks:
-      - codara
-
-volumes:
-  codara_data:
-  codara_config:
-  codara_logs:
-  codara_workspaces:
-  redis_data:
 
 networks:
   codara:
