@@ -4,7 +4,7 @@ import axios from 'axios';
 import { Activity, FolderCode, GitBranch, Users } from 'lucide-react';
 import type { WorkspaceRecord } from '../types/api';
 import { dashboardPollHeaders } from '../api/dashboardPoll';
-import { WorkspaceDrawer } from '../components/workspaces/WorkspaceDrawer';
+import { WorkspaceDrawer } from '../components/workspaces';
 
 const getErrorMessage = (error: unknown) => {
   if (axios.isAxiosError(error)) {
