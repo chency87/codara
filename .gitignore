@@ -40,4 +40,3 @@ configs/*.db
 
 .egg-info/
 
-workspaces/
