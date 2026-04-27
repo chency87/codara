@@ -14,37 +14,14 @@ class SessionStatus(str, Enum):
     DIRTY = "dirty"
     EXPIRED = "expired"
 
-class AuthType(str, Enum):
-    OAUTH_SESSION = "OAUTH_SESSION"
-    API_KEY = "API_KEY"
-    SERVICE_ACCOUNT = "SERVICE_ACCOUNT"
-
-
-class AccountStatus(str, Enum):
-    ACTIVE = "active"
-    READY = "ready"
-    COOLDOWN = "cooldown"
-    EXPIRED = "expired"
-    DISABLED = "disabled"
-    ERROR = "error"
-
-
-ENABLED_ACCOUNT_STATUSES = {
-    AccountStatus.ACTIVE.value,
-    AccountStatus.READY.value,
-}
-
-
-def is_account_enabled_status(status: str) -> bool:
-    return status in ENABLED_ACCOUNT_STATUSES
-
-
 class UserStatus(str, Enum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
     DELETED = "deleted"
 
+
 class Message(BaseModel):
+
     role: str
     content: str
 
@@ -109,49 +86,6 @@ class UagOptions(BaseModel):
         description="Internal field injected by the gateway after API-key validation.",
     )
 
-class Account(BaseModel):
-    account_id: str
-    credential_id: Optional[str] = None
-    inventory_source: str = "vault"
-    provider: ProviderType
-    auth_type: AuthType
-    label: str
-    encrypted_credential: Optional[str] = None
-    status: str = AccountStatus.ACTIVE.value
-    auth_index: Optional[str] = None
-    cooldown_until: Optional[datetime] = None
-    last_seen_at: Optional[datetime] = None
-    last_used_at: Optional[datetime] = None
-    cli_primary: bool = False
-    usage_tpm: int = 0
-    usage_rpd: int = 0
-    usage_hourly: int = 0
-    usage_weekly: int = 0
-    tpm_limit: int = 100000
-    rpd_limit: int = 5000
-    hourly_limit: int = 50000
-    weekly_limit: int = 1000000
-    remaining_compute_hours: float = 0.0 # e.g. "5h left"
-    hourly_used_pct: Optional[float] = None
-    weekly_used_pct: Optional[float] = None
-    hourly_reset_after_seconds: Optional[int] = None
-    weekly_reset_after_seconds: Optional[int] = None
-    hourly_reset_at: Optional[datetime] = None
-    weekly_reset_at: Optional[datetime] = None
-    access_token_expires_at: Optional[datetime] = None
-    usage_source: Optional[str] = None
-    plan_type: Optional[str] = None
-    rate_limit_allowed: Optional[bool] = None
-    rate_limit_reached: Optional[bool] = None
-    credits_has_credits: Optional[bool] = None
-    credits_unlimited: Optional[bool] = None
-    credits_overage_limit_reached: Optional[bool] = None
-    approx_local_messages_min: Optional[int] = None
-    approx_local_messages_max: Optional[int] = None
-    approx_cloud_messages_min: Optional[int] = None
-    approx_cloud_messages_max: Optional[int] = None
-
-
 class User(BaseModel):
     user_id: str
     email: str
@@ -178,39 +112,31 @@ class ApiKey(BaseModel):
     revoked_at: Optional[datetime] = None
 
 
-class UserUsage(BaseModel):
+class Workspace(BaseModel):
+    workspace_id: str
+    name: str
+    path: str
     user_id: str
-    period: str
-    provider: ProviderType
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_hit_tokens: int = 0
-    request_count: int = 0
+    template: str = "default"
+    default_provider: Optional[ProviderType] = None
+    created_at: datetime
+    updated_at: datetime
 
-
-class WorkspaceReset(BaseModel):
-    reset_id: str
-    user_id: str
-    triggered_by: str
-    actor_id: str
-    sessions_wiped: int
-    reset_at: datetime
 
 class Session(BaseModel):
-    client_session_id: str
+    session_id: str
+    workspace_id: str
+    client_session_id: Optional[str] = None
     backend_id: str
     provider: ProviderType
-    account_id: str
-    user_id: Optional[str] = None
+    user_id: str
     api_key_id: Optional[str] = None
     cwd_path: str
-    prefix_hash: str
     status: SessionStatus = SessionStatus.IDLE
-    fence_token: int = 0
-    last_context_tokens: int = 0
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+
 
 class TurnResult(BaseModel):
     output: str
@@ -220,5 +146,24 @@ class TurnResult(BaseModel):
     diff: Optional[str] = None
     actions: List[Dict[str, Any]] = [] # For ATR module
     dirty: bool = False
-    context_tokens: Optional[int] = None
     is_retry: bool = False
+
+
+class Task(BaseModel):
+    task_id: str
+    session_id: str
+    workspace_id: str
+    user_id: str
+    prompt: str
+    status: str = "pending" # pending, running, completed, failed
+    result: Optional[TurnResult] = None
+    created_at: datetime
+    updated_at: datetime
+
+class WorkspaceReset(BaseModel):
+    reset_id: str
+    user_id: str
+    triggered_by: str
+    actor_id: str
+    sessions_wiped: int
+    reset_at: datetime

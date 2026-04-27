@@ -1,104 +1,80 @@
-# Codara Architecture Map
+# System Architecture
 
-This document is a concise map of the live component boundaries. Use [index.md](./index.md) for the fuller system guide.
+Codara is built as a modular gateway that coordinates between external API clients, internal orchestration logic, and local CLI-native provider runtimes.
 
-## 1. Component Map
+## Component Overview
 
-```text
-Ingress
-  ├─ /v1/chat/completions
-  ├─ /management/v1/*
-  ├─ /v1/user/*
-  └─ /channels/telegram/{bot_name}/webhook or polling
-
-Gateway Layer
-  ├─ auth and token validation
-  ├─ request normalization
-  ├─ management response shaping
-  └─ dashboard static asset serving
-
-Shared Services
-  ├─ InferenceService
-  ├─ ChannelService
-  └─ UsageMonitor
-
-Runtime Core
-  ├─ Orchestrator
-  ├─ Provider adapters
-  └─ Workspace engine
-
-Persistence
-  ├─ SQLite product state
-  ├─ vault credential files
-  ├─ runtime log shards
-  └─ trace shards
+```mermaid
+graph TD
+    Client[API Clients / SDKs] --> Gateway[FastAPI Gateway]
+    Gateway --> Auth[Auth & Token Validation]
+    Gateway --> InfService[Inference Service]
+    Gateway --> ChannelService[Channel Service]
+    
+    InfService --> Orchestrator[Orchestrator Engine]
+    ChannelService --> Orchestrator
+    
+    Orchestrator --> WSEngine[Workspace Engine]
+    Orchestrator --> Adapters[Provider Adapters]
+    
+    Adapters --> CLI[Local CLIs: Gemini / Codex / OpenCode]
+    
+    Orchestrator --> SQLite[(SQLite Persistence)]
+    Orchestrator --> Logs[(File-backed Logs & Traces)]
 ```
 
-## 2. Request Boundaries
+## Request Flow
 
-### User-bound execution
+The following diagram illustrates the lifecycle of a standard inference request:
 
-User-bound turns should flow through `InferenceService` so workspace binding, session naming, and attachment staging stay consistent across:
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant O as Orchestrator
+    participant W as Workspace Engine
+    participant A as Provider Adapter
+    participant P as Local CLI
+    
+    C->>G: POST /v1/chat/completions (with API Key)
+    G->>G: Validate API Key & Resolve User
+    G->>O: handle_request(messages, options)
+    
+    O->>O: Acquire Session & User Locks
+    O->>W: Acquire Workspace Lock
+    W->>W: Take Filesystem Snapshot (if not Git)
+    
+    O->>A: send_turn(session, messages)
+    A->>P: Execute CLI (gemini/codex/opencode)
+    P-->>A: CLI Output + Backend ID
+    A-->>O: TurnResult
+    
+    O->>W: generate_diff()
+    W-->>O: Modified Files + Unified Diff
+    
+    O->>O: Extract ATR Actions
+    O->>O: Persist Session, Task & Turn State
+    
+    O-->>G: Final TurnResult
+    G-->>C: OpenAI-compatible JSON Response
+```
 
-- user API requests
-- dashboard playground requests
-- Telegram channel requests
+## Internal Layer Responsibilities
 
-### Provider execution
+### 1. Gateway Layer
+- **FastAPI Application**: Serves as the web entry point.
+- **Request Shaping**: Normalizes OpenAI-style requests into internal `UagOptions`.
+- **Security**: Handles JWT-based dashboard auth and API-key-based user auth.
 
-Provider adapters are intentionally local-CLI based:
+### 2. Orchestration Layer
+- **Concurrency Control**: Uses semaphores and per-session/per-user locks to prevent race conditions.
+- **Task Management**: Creates and tracks the lifecycle of every request as a `Task`.
+- **State Persistence**: Interfaces with SQLite to store long-lived metadata.
 
-- Codex uses the local installed `codex` executable with a managed isolated home
-- Gemini uses the local installed `gemini` CLI with host login state
-- OpenCode uses the local installed `opencode` CLI with host login state
+### 3. Execution Layer
+- **Provider Adapters**: Specialized wrappers for different LLM runtimes (Gemini, Codex, OpenCode). They communicate with local CLIs via subprocesses.
+- **Workspace Engine**: Manages the directory where agents work. It handles locking, Git integration, and filesystem diffing.
 
-## 3. Persistence Boundaries
-
-### SQLite owns
-
-- users
-- API keys
-- sessions
-- turns
-- accounts
-- usage summaries
-- workspace resets
-- channel links, conversations, link tokens, runtime state
-- audit log
-
-### File-backed storage owns
-
-- runtime logs under `logs/runtime/...`
-- traces under `logs/traces/...`
-
-### Vault storage owns
-
-- managed provider credential blobs under the Codara config directory
-
-## 4. Isolation Model
-
-Codara uses two different runtime-auth models:
-
-- **Managed isolated model**
-  - Codex credentials are stored in the vault and injected into an isolated runtime home
-- **System-local model**
-  - Gemini and OpenCode depend on the host machine's local CLI login
-
-That split is deliberate. Do not collapse them into one generic provider-auth model in docs or code.
-
-## 5. Dashboard Map
-
-The live dashboard routes are:
-
-- `/`
-- `/playground`
-- `/sessions`
-- `/workspaces`
-- `/accounts`
-- `/users`
-- `/providers`
-- `/usage`
-- `/observability`
-- `/audit`
-
-`/traces` and `/logs` still exist as standalone pages, but the main debugging workflow is the unified Observability page.
+### 4. Persistence Layer
+- **SQLite**: Primary store for users, workspaces, sessions, tasks, and audit logs.
+- **Log Shards**: Transactional execution logs and traces stored as individual files for high-volume observability.

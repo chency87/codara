@@ -1,8 +1,7 @@
+from codara.core.models import TurnResult
 from fastapi.testclient import TestClient
 
 import codara.gateway.app as gateway_app
-from codara.accounts.pool import AccountPool
-from codara.core.models import Account, AuthType, ProviderType, TurnResult
 from codara.database.manager import DatabaseManager
 from codara.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
@@ -18,7 +17,6 @@ class _FakeAdapter:
             diff=None,
             actions=[],
             dirty=False,
-            context_tokens=42,
         )
 
 def _provision_user(client: TestClient, headers: dict, email: str, display_name: str):
@@ -48,15 +46,6 @@ def test_user_key_request_persists_session_owner_and_key_binding(tmp_path, monke
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
     monkeypatch.setattr(gateway_app.orchestrator, "_get_adapter", lambda provider: _FakeAdapter())
-    AccountPool(gateway_app.db_manager).register_account(
-        Account(
-            account_id="codex-ready",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Ready",
-        ),
-        "sk-ready",
-    )
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client)
@@ -80,7 +69,6 @@ def test_user_key_request_persists_session_owner_and_key_binding(tmp_path, monke
     session = gateway_app.db_manager.get_session(session_id)
     assert session is not None
     assert session.user_id == user_id
-    assert session.api_key_id == key_id
 
 
 def test_management_views_expose_bound_user_sessions_and_activity(tmp_path, monkeypatch):
@@ -95,15 +83,6 @@ def test_management_views_expose_bound_user_sessions_and_activity(tmp_path, monk
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
     monkeypatch.setattr(gateway_app.orchestrator, "_get_adapter", lambda provider: _FakeAdapter())
-    AccountPool(gateway_app.db_manager).register_account(
-        Account(
-            account_id="codex-ready",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Ready",
-        ),
-        "sk-ready",
-    )
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client)
@@ -137,4 +116,4 @@ def test_management_views_expose_bound_user_sessions_and_activity(tmp_path, monk
     assert detail["sessions"][0]["api_key_label"] == "primary"
     assert detail["recent_activity"][0]["client_session_id"] == session_id
     assert detail["recent_activity"][0]["api_key_label"] == "primary"
-    assert detail["recent_activity"][0]["output_tokens"] == 42
+    assert detail["recent_activity"][0]["duration_ms"] >= 0

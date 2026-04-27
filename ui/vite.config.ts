@@ -4,11 +4,18 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/dashboard',
+  base: '/dashboard/',
   server: {
+    port: 5173,
     proxy: {
-      '/v1': 'http://localhost:8000',
-      '/management': 'http://localhost:8000',
+      '/v1': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/management': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     }
   }
 })

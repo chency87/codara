@@ -1,3 +1,4 @@
+from codara.core.models import TurnResult, UagOptions, ProviderType, Session, Message
 import asyncio
 from pathlib import Path
 import subprocess
@@ -6,10 +7,8 @@ from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
 import codara.gateway.app as gateway_app
-from codara.accounts.pool import AccountPool
 from codara.adapters.codex import CodexAdapter
 from codara.database.manager import DatabaseManager
-from codara.core.models import Account, AuthType, Message, ProviderType, Session, SessionStatus, TurnResult, UagOptions
 from codara.orchestrator.engine import Orchestrator
 from codara.workspace.engine import WorkspaceEngine
 from tests.helpers import operator_headers
@@ -69,10 +68,6 @@ def test_user_provisioning_and_user_plane(tmp_path, monkeypatch):
     assert sessions_resp.status_code == 200
     assert sessions_resp.json()["data"] == []
 
-    usage_resp = client.get("/v1/user/usage", headers=user_headers)
-    assert usage_resp.status_code == 200
-    assert usage_resp.json()["data"]["summary"]["total_tokens"] == 0
-
 
 def test_user_self_service_requires_api_key(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
@@ -87,7 +82,7 @@ def test_user_self_service_requires_api_key(tmp_path, monkeypatch):
 
     client = TestClient(gateway_app.app)
 
-    for path in ("/v1/user/me", "/v1/user/keys", "/v1/user/usage", "/v1/user/sessions"):
+    for path in ("/v1/user/me", "/v1/user/keys", "/v1/user/sessions"):
         resp = client.get(path)
         assert resp.status_code == 401
 
@@ -199,93 +194,6 @@ def test_rotating_user_key_replaces_current_key_in_user_detail(tmp_path, monkeyp
     assert history[0].status == "active"
     assert any(key.key_id == old_key_id and key.status == "revoked" for key in history)
 
-def test_chat_completions_returns_503_when_no_available_account(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
-    workspaces_root = tmp_path / "workspaces"
-
-    monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
-    gateway_app.settings.secret_key = "unit-test-secret"
-    gateway_app.clear_auth_caches()
-    gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.db_manager = DatabaseManager(str(db_path))
-    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
-
-    client = TestClient(gateway_app.app)
-    headers = operator_headers(client)
-
-    create_resp = client.post(
-        "/management/v1/users",
-        headers=headers,
-        json={
-            "email": "no-account@example.com",
-            "display_name": "No Account User",
-            "key_label": "primary",
-            "max_concurrency": 2,
-        },
-    )
-    assert create_resp.status_code == 200
-    raw_key = create_resp.json()["data"]["api_key"]["raw_key"]
-
-    chat_resp = client.post(
-        "/v1/chat/completions",
-        headers={"Authorization": f"Bearer {raw_key}"},
-        json={
-            "model": "uag-codex-v5",
-            "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "codex"},
-        },
-    )
-
-    assert chat_resp.status_code == 503
-    assert "No available account for provider" in chat_resp.json()["detail"]
-
-
-def test_chat_completions_returns_quota_exhaustion_message(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
-    workspaces_root = tmp_path / "workspaces"
-
-    monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
-    gateway_app.settings.secret_key = "unit-test-secret"
-    gateway_app.clear_auth_caches()
-    gateway_app.settings.workspaces_root = str(workspaces_root)
-    gateway_app.db_manager = DatabaseManager(str(db_path))
-    gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
-
-    async def fake_handle_request(options, messages, provider_model=None):
-        raise RuntimeError("Exhausted your capacity on this model. Your quota will reset at 5:00 PM.")
-
-    monkeypatch.setattr(gateway_app.orchestrator, "handle_request", fake_handle_request)
-
-    client = TestClient(gateway_app.app)
-    headers = operator_headers(client)
-
-    create_resp = client.post(
-        "/management/v1/users",
-        headers=headers,
-        json={
-            "email": "quota@example.com",
-            "display_name": "Quota User",
-            "key_label": "primary",
-            "max_concurrency": 2,
-        },
-    )
-    assert create_resp.status_code == 200
-    raw_key = create_resp.json()["data"]["api_key"]["raw_key"]
-
-    chat_resp = client.post(
-        "/v1/chat/completions",
-        headers={"Authorization": f"Bearer {raw_key}"},
-        json={
-            "model": "uag-codex-v5",
-            "messages": [{"role": "user", "content": "ping"}],
-            "uag_options": {"provider": "codex"},
-        },
-    )
-
-    assert chat_resp.status_code == 429
-    assert "Exhausted your capacity on this model" in chat_resp.json()["detail"]
-
-
 def test_chat_completions_returns_provider_runtime_detail(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     workspaces_root = tmp_path / "workspaces"
@@ -297,7 +205,7 @@ def test_chat_completions_returns_provider_runtime_detail(tmp_path, monkeypatch)
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         raise RuntimeError("Codex exec failed: missing field `id_token` at line 1 column 68")
 
     monkeypatch.setattr(gateway_app.orchestrator, "handle_request", fake_handle_request)
@@ -345,9 +253,9 @@ def test_user_workspace_id_resolves_inside_base_workspace(tmp_path, monkeypatch)
 
     observed = {}
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         observed["workspace_root"] = options.workspace_root
-        observed["workspace_id"] = options.workspace_id
+        observed["workspace_id"] = options.workspace_id or workspace_id
         observed["client_session_id"] = options.client_session_id
         observed["provider_model"] = provider_model
         return TurnResult(
@@ -423,7 +331,7 @@ def test_chat_completions_passes_explicit_provider_model(tmp_path, monkeypatch):
 
     observed = {}
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         observed["provider_model"] = provider_model
         return TurnResult(
             output="ok",
@@ -480,7 +388,7 @@ def test_chat_completions_multipart_uploads_are_staged_into_workspace(tmp_path, 
 
     observed = {}
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         observed["workspace_root"] = options.workspace_root
         observed["messages"] = list(messages)
         observed["provider_model"] = provider_model
@@ -574,18 +482,7 @@ old_value = 2
 
     monkeypatch.setattr(gateway_app.orchestrator, "_get_adapter", lambda provider: FakeAdapter())
 
-    from codara.accounts.pool import AccountPool
-    from codara.core.models import Account, AuthType
 
-    AccountPool(gateway_app.db_manager).register_account(
-        Account(
-            account_id="codex-ready",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Ready",
-        ),
-        "sk-ready",
-    )
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client)
@@ -638,7 +535,7 @@ def test_user_workspace_id_rejects_path_traversal(tmp_path, monkeypatch):
     gateway_app.db_manager = DatabaseManager(str(db_path))
     gateway_app.orchestrator = Orchestrator(gateway_app.db_manager)
 
-    async def fake_handle_request(options, messages, provider_model=None):
+    async def fake_handle_request(options, messages, provider_model=None, workspace_id=None):
         raise AssertionError("orchestrator should not be called for invalid workspace ids")
 
     monkeypatch.setattr(gateway_app.orchestrator, "handle_request", fake_handle_request)
@@ -688,7 +585,6 @@ def test_orchestrator_preserves_gemini_backend_id_between_turns(tmp_path):
                 diff=None,
                 actions=[],
                 dirty=False,
-                context_tokens=5,
             )
 
     orchestrator._get_adapter = lambda provider: FakeAdapter()
@@ -735,7 +631,6 @@ def test_orchestrator_converts_workspace_diff_into_atr_actions(tmp_path):
                 diff=None,
                 actions=[],
                 dirty=False,
-                context_tokens=5,
             )
 
     orchestrator._get_adapter = lambda provider: FakeAdapter()
@@ -771,100 +666,6 @@ def test_orchestrator_reuses_adapter_instances(tmp_path):
     assert first is second
 
 
-def test_orchestrator_syncs_codex_session_state_when_failing_over_accounts(tmp_path, monkeypatch):
-    db = DatabaseManager(str(tmp_path / "codara.db"))
-    orchestrator = Orchestrator(db)
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    WorkspaceEngine(str(workspace)).ensure_git_repository()
-
-    pool = AccountPool(db)
-    account_a = Account(
-        account_id="codex-a",
-        provider=ProviderType.CODEX,
-        auth_type=AuthType.API_KEY,
-        label="Codex A",
-    )
-    account_b = Account(
-        account_id="codex-b",
-        provider=ProviderType.CODEX,
-        auth_type=AuthType.API_KEY,
-        label="Codex B",
-    )
-    pool.register_account(account_a, "sk-a")
-    pool.register_account(account_b, "sk-b")
-
-    now = datetime.now()
-    db.save_session(
-        Session(
-            client_session_id="codex-thread",
-            backend_id="backend-1",
-            provider=ProviderType.CODEX,
-            account_id="codex-a",
-            cwd_path=str(workspace),
-            prefix_hash="prefix",
-            status=SessionStatus.IDLE,
-            fence_token=0,
-            last_context_tokens=0,
-            created_at=now,
-            updated_at=now,
-            expires_at=now + timedelta(hours=1),
-        )
-    )
-
-    def fake_acquire_account(provider):
-        return db.get_account("codex-b")
-
-    monkeypatch.setattr(orchestrator.account_pool, "acquire_account", fake_acquire_account)
-
-    class FakeCodexAdapter(CodexAdapter):
-        def __init__(self):
-            super().__init__(db_manager=db)
-            self.send_calls = []
-            self.synced = []
-
-        async def send_turn(self, session, messages, provider_model):
-            self.send_calls.append((session.account_id, session.backend_id, provider_model))
-            if len(self.send_calls) == 1:
-                raise RuntimeError("Codex Rate Limit: 429 rate limit exceeded")
-            return TurnResult(
-                output="ok",
-                backend_id="backend-1",
-                finish_reason="stop",
-                modified_files=[],
-                diff=None,
-                actions=[],
-                dirty=False,
-                context_tokens=9,
-            )
-
-        def sync_account_session_state(self, source_account_id: str, target_account_id: str) -> bool:
-            self.synced.append((source_account_id, target_account_id))
-            return True
-
-    adapter = FakeCodexAdapter()
-    orchestrator._adapters[ProviderType.CODEX] = adapter
-
-    result = asyncio.run(
-        orchestrator.handle_request(
-            UagOptions(
-                provider=ProviderType.CODEX,
-                workspace_root=str(workspace),
-                client_session_id="codex-thread",
-            ),
-            [Message(role="user", content="continue")],
-            provider_model="gpt-5-codex",
-        )
-    )
-
-    assert result.output == "ok"
-    assert adapter.synced == [("codex-a", "codex-b")]
-    assert adapter.send_calls == [
-        ("codex-a", "backend-1", "gpt-5-codex"),
-        ("codex-b", "backend-1", "gpt-5-codex"),
-    ]
-
-
 def test_user_provider_models_endpoint_returns_adapter_listings(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
     workspaces_root = tmp_path / "workspaces"
@@ -879,9 +680,6 @@ def test_user_provider_models_endpoint_returns_adapter_listings(tmp_path, monkey
     class FakeAdapter:
         async def send_turn(self, session, messages, provider_model):
             raise AssertionError("send_turn should not be called")
-
-        async def collect_usage(self, account, credential, settings):
-            return None
 
         async def list_models(self, settings):
             return {

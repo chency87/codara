@@ -17,7 +17,6 @@ nav:
   - Home: index.md
   - Architecture:
     - architecture.md
-    - accountpool.md
     - token_usage.md
   - API & Dashboard: api-dashboard.md
   - Technical Documentation:

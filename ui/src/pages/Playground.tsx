@@ -36,8 +36,8 @@ const extractAssistantOutput = (response: ChatResponsePayload | null) => {
 };
 
 const Playground = () => {
-  const [provider, setProvider] = useState('codex');
-  const [model, setModel] = useState('uag-codex');
+  const [provider, setProvider] = useState('gemini');
+  const [model, setModel] = useState('uag-gemini');
   const [message, setMessage] = useState('');
   const [workspaceId, setWorkspaceId] = useState('default');
   const [sessionLabel, setSessionLabel] = useState('');
@@ -114,16 +114,16 @@ const Playground = () => {
   const rawResponse = formatPayload(response);
 
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="mb-12">
-        <h2 className="text-4xl font-black tracking-tight text-white mb-2">Agent Playground</h2>
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <header className="mb-8 lg:mb-12">
+        <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Agent Playground</h2>
         <p className="text-slate-500 font-medium">Test system prompts, workspace isolation, and provider adapters.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
         <div className="space-y-8">
-          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
-            <div className="flex items-center space-x-4">
+          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
               <div className="flex-1 space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Target Provider</label>
                 <div className="relative">
@@ -295,10 +295,6 @@ const Playground = () => {
                     <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/20 text-center">
                       <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Bound User</div>
                       <div className="text-xs font-black text-white">{response?.extensions?.bound_user_display_name || 'dashboard admin'}</div>
-                    </div>
-                    <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/20 text-center">
-                      <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Reported Context Tokens</div>
-                      <div className="text-xs font-black text-white">{response?.extensions?.reported_context_tokens ?? 'n/a'}</div>
                     </div>
                   </div>
                 </>

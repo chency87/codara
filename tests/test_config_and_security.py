@@ -22,20 +22,15 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
                 "",
                 "[workspace]",
                 'root = "workspaces-root"',
-                'isolated_envs_root = "shared-isolated"',
                 "",
                 "[logging]",
                 'runtime_root = "runtime-store"',
                 "retention_days = 12",
                 "",
                 "[providers.codex]",
-                'billing_api_key = "sk-billing-test"',
-                'usage_endpoints = "https://example.test/usage-a,https://example.test/usage-b"',
-                'oauth_url = "https://example.test/oauth"',
                 "stall_timeout_seconds = 111",
                 "",
                 "[providers.gemini]",
-                'usage_endpoints = "https://example.test/gemini-a,https://example.test/gemini-b"',
                 "stall_timeout_seconds = 222",
                 "",
                 "[providers.opencode]",
@@ -83,13 +78,8 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
     assert settings.app_name == "Codara Test"
     assert settings.database_path == str((tmp_path / "custom.db").resolve())
     assert settings.workspaces_root == str((tmp_path / "workspaces-root").resolve())
-    assert settings.isolated_envs_root == str((tmp_path / "shared-isolated").resolve())
     assert settings.port == 9002
-    assert settings.codex_billing_api_key == "sk-billing-test"
-    assert settings.codex_usage_endpoints == "https://example.test/usage-a,https://example.test/usage-b"
-    assert settings.codex_oauth_url == "https://example.test/oauth"
     assert settings.codex_stall_timeout_seconds == 111
-    assert settings.gemini_usage_endpoints == "https://example.test/gemini-a,https://example.test/gemini-b"
     assert settings.gemini_stall_timeout_seconds == 222
     assert settings.opencode_stall_timeout_seconds == 333
     assert settings.release_check_enabled is True
@@ -140,6 +130,11 @@ def test_management_routes_require_operator_token(monkeypatch):
 
     assert authorized.status_code == 200
     assert authorized.json()["ok"] is True
+
+    # After login, the server sets HttpOnly cookies, so browser-style requests without
+    # an Authorization header should also be authorized.
+    cookie_authorized = client.get("/management/v1/health")
+    assert cookie_authorized.status_code == 200
 
 
 def test_management_login_reads_api_token_from_dotenv_without_restart(tmp_path, monkeypatch):

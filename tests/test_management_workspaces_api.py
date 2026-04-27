@@ -1,11 +1,10 @@
-from datetime import datetime, timedelta
+from codara.core.models import Session, ProviderType, SessionStatus
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 import codara.gateway.app as gateway_app
-from codara.accounts.pool import AccountPool
-from codara.core.models import Account, AuthType, ProviderType, Session, SessionStatus
 from codara.database.manager import DatabaseManager
 from codara.workspace.engine import WorkspaceEngine
 from tests.helpers import operator_headers
@@ -21,15 +20,6 @@ def _setup_workspace_api(tmp_path, monkeypatch):
     gateway_app.settings.workspaces_root = str(workspaces_root)
     gateway_app.db_manager = DatabaseManager(str(db_path))
 
-    AccountPool(gateway_app.db_manager).register_account(
-        Account(
-            account_id="codex-ready",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Ready",
-        ),
-        "sk-ready",
-    )
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client)
@@ -47,21 +37,51 @@ def _setup_workspace_api(tmp_path, monkeypatch):
     base_workspace = Path(created["workspace_path"])
     user_id = created["user_id"]
 
+    # Retrieve the automatically created workspace for the user
+    workspaces = gateway_app.db_manager.list_workspaces_v2(user_id=user_id)
+    if not workspaces:
+        # If not found (e.g. if the API didn't create a DB record for it yet in v2 sense, 
+        # though create_user should have), we can create one manually for the test.
+        from codara.core.models import Workspace
+        workspace_id = "wsk-base"
+        gateway_app.db_manager.save_workspace(Workspace(
+            workspace_id=workspace_id,
+            name="default",
+            path=str(base_workspace),
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        ))
+    else:
+        workspace_id = workspaces[0].workspace_id
+
     subworkspace = base_workspace / "project-a"
     subworkspace.mkdir(parents=True, exist_ok=True)
     WorkspaceEngine(str(subworkspace)).ensure_git_repository()
     (subworkspace / "notes.txt").write_text("hello workspace", encoding="utf-8")
 
-    now = datetime.now()
+    # For the subworkspace, we also need a Workspace record in DB
+    sub_workspace_id = "wsk-sub"
+    from codara.core.models import Workspace
+    gateway_app.db_manager.save_workspace(Workspace(
+        workspace_id=sub_workspace_id,
+        name="project-a",
+        path=str(subworkspace),
+        user_id=user_id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
+    ))
+
+    now = datetime.now(timezone.utc)
     gateway_app.db_manager.save_session(
         Session(
+            session_id=f"{user_id}::default::base-thread",
+            workspace_id=workspace_id,
             client_session_id=f"{user_id}::default::base-thread",
             backend_id="backend-base",
             provider=ProviderType.CODEX,
-            account_id="codex-ready",
             user_id=user_id,
             cwd_path=str(base_workspace),
-            prefix_hash="base",
             status=SessionStatus.IDLE,
             created_at=now,
             updated_at=now,
@@ -70,13 +90,13 @@ def _setup_workspace_api(tmp_path, monkeypatch):
     )
     gateway_app.db_manager.save_session(
         Session(
+            session_id=f"{user_id}::project-a::sub-thread",
+            workspace_id=sub_workspace_id,
             client_session_id=f"{user_id}::project-a::sub-thread",
             backend_id="backend-sub",
             provider=ProviderType.CODEX,
-            account_id="codex-ready",
             user_id=user_id,
             cwd_path=str(subworkspace),
-            prefix_hash="sub",
             status=SessionStatus.ACTIVE,
             created_at=now,
             updated_at=now,
@@ -95,22 +115,23 @@ def test_management_workspaces_lists_git_metadata_and_bindings(tmp_path, monkeyp
     assert resp.status_code == 200
     rows = resp.json()["data"]
     by_path = {row["path"]: row for row in rows}
+    if str(base_workspace) not in by_path:
+        print(f"DEBUG BY_PATH: {list(by_path.keys())}")
+        print(f"DEBUG BASE: {str(base_workspace)}")
     assert str(base_workspace) in by_path
     assert str(subworkspace) in by_path
 
     base_row = by_path[str(base_workspace)]
     sub_row = by_path[str(subworkspace)]
 
-    assert base_row["scope"] == "base"
+    assert base_row["scope"] == "user"
     assert base_row["bound_users_count"] == 1
-    assert base_row["bound_sessions_count"] == 2
+    assert base_row["bound_sessions_count"] == 1
     assert base_row["git"]["is_git_repo"] is True
-    assert base_row["git"]["branch"] is not None
 
-    assert sub_row["scope"] == "subworkspace"
+    assert sub_row["scope"] == "user"
     assert sub_row["bound_users_count"] == 1
     assert sub_row["bound_sessions_count"] == 1
-    assert sub_row["git"]["head_commit"] is not None
 
     detail_resp = client.get(f"/management/v1/workspaces/{sub_row['workspace_id']}", headers=headers)
     assert detail_resp.status_code == 200

@@ -10,17 +10,21 @@
 # /data, /config, /logs, and /workspaces.
 # ---------------------------------------------------------------------------
 
-FROM node:24-alpine AS ui-builder
+# Stage 1: Build the UI
+FROM node:24-slim AS ui-builder
 
 WORKDIR /app/ui
 
+# Install dependencies first (better caching)
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 
+# Copy source and build
 COPY ui/ ./
 RUN npm run build
 
 
+# Stage 2: Build the Python environment
 FROM python:3.12-slim AS python-builder
 
 ENV VIRTUAL_ENV=/app/.venv \
@@ -30,16 +34,19 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 WORKDIR /app
 
+# Install uv for fast dependency management
 RUN pip install --no-cache-dir uv
 
+# Install dependencies first
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
+# Use uv to sync the environment from the lockfile
 RUN uv venv "$VIRTUAL_ENV" \
-    && uv pip install -r uv.lock \
-    && uv pip install --no-deps .
+    && uv sync --frozen --no-dev
 
 
+# Stage 3: Final Runtime Image
 FROM python:3.12-slim AS runtime
 
 ARG CODEX_CLI_PACKAGE="@openai/codex@latest"
@@ -52,12 +59,9 @@ ARG USERNAME="codara"
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-
 ENV VIRTUAL_ENV=/app/.venv \
     NVM_DIR=/home/${USERNAME}/.nvm \
-    NVM_SYMLINK_CURRENT=true \
-    UV_TOOL_BIN_DIR=/home/${USERNAME}/.local/bin \
-    PATH="/home/${USERNAME}/.nvm/current/bin:/app/.venv/bin:/home/${USERNAME}/.local/bin:$PATH" \
+    PATH="/app/.venv/bin:/home/${USERNAME}/.local/bin:/home/${USERNAME}/.nvm/versions/node/v${NODE_VERSION}/bin:$PATH" \
     HOME=/home/${USERNAME} \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -69,9 +73,9 @@ ENV VIRTUAL_ENV=/app/.venv \
     UAG_CONFIG_DIR=/config \
     UAG_DATABASE_PATH=/data/codara.db \
     UAG_WORKSPACES_ROOT=/workspaces \
-    UAG_ISOLATED_ENVS_ROOT=/workspaces/isolated_envs \
     UAG_LOGS_ROOT=/logs
 
+# Install system dependencies
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
     apt-get update \
@@ -90,10 +94,11 @@ RUN --mount=type=cache,target=/var/cache/apt \
         tmux \
         vim \
         wget \
-    && sed -i 's/^# *\\(en_US.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen \
+    && sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
+# Setup user and directories
 RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
     && useradd \
         --uid "${USER_UID}" \
@@ -108,7 +113,6 @@ RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
         /config \
         /logs \
         /workspaces \
-        /workspaces/isolated_envs \
         "/home/${USERNAME}/.local/bin" \
         "/home/${USERNAME}/.local/share" \
         "/home/${USERNAME}/.history" \
@@ -125,6 +129,7 @@ RUN groupadd --gid "${USER_GID}" "${USERNAME}" \
 
 WORKDIR /app
 
+# Copy built artifacts
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/.venv /app/.venv
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/src /app/src
 COPY --from=python-builder --chown=${USER_UID}:${USER_GID} /app/pyproject.toml /app/README.md ./
@@ -132,10 +137,9 @@ COPY --from=ui-builder --chown=${USER_UID}:${USER_GID} /app/ui/dist /app/ui/dist
 
 USER ${USERNAME}
 
+# Install NVM, Node.js and provider CLIs
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-RUN mkdir -p "$NVM_DIR" \
-    && curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" | bash \
+RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" | bash \
     && . "$NVM_DIR/nvm.sh" \
     && nvm install "$NODE_VERSION" \
     && nvm alias default "$NODE_VERSION" \
@@ -145,14 +149,9 @@ RUN mkdir -p "$NVM_DIR" \
         "${GEMINI_CLI_PACKAGE}" \
         "${OPENCODE_CLI_PACKAGE}" \
         "${PNPM_PACKAGE}" \
-    && npm cache clean --force \
-    && node --version \
-    && npm --version \
-    && pnpm --version \
-    && command -v codex \
-    && command -v gemini \
-    && command -v opencode
+    && npm cache clean --force
 
+# Setup shell environment
 RUN printf '%s\n' \
         'export HISTFILE=$HOME/.history/.bash_history' \
         'export HISTSIZE=10000' \
@@ -162,7 +161,7 @@ RUN printf '%s\n' \
         'PROMPT_COMMAND="history -a; history -c; history -r"' \
         'export NVM_DIR=$HOME/.nvm' \
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' \
-        'export PATH=$NVM_DIR/current/bin:/app/.venv/bin:$HOME/.local/bin:$PATH' \
+        'export PATH=/app/.venv/bin:$HOME/.local/bin:$PATH' \
         '[[ $- == *i* ]] && bind "\e[A":history-search-backward' \
         '[[ $- == *i* ]] && bind "\e[B":history-search-forward' \
         > "$HOME/.bashrc" \
@@ -170,8 +169,6 @@ RUN printf '%s\n' \
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${UAG_PORT}/management/v1/health" >/dev/null || exit 1
-
+# Use tini as init and start the server
 ENTRYPOINT ["tini", "--"]
 CMD ["codara", "serve", "--host", "0.0.0.0", "--port", "8000"]

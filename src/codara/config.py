@@ -12,18 +12,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from codara.core.models import ProviderType
 
-CONFIG_ENV_VAR = "UAG_CONFIG_PATH"
-CONFIG_DIR_ENV_VAR = "UAG_CONFIG_DIR"
 DEFAULT_CONFIG_FILENAME = "codara.toml"
-DEFAULT_CONFIG_DIRNAME = "codara"
+CONFIG_ENV_VAR = "UAG_CONFIG_PATH"
 
-_FIELD_ENV_MAP = {
+
+_FIELD_ENV_MAP: Dict[str, str] = {
     "app_name": "UAG_APP_NAME",
     "app_version": "UAG_APP_VERSION",
     "debug": "UAG_DEBUG",
     "host": "UAG_HOST",
     "port": "UAG_PORT",
-    "secret_key": "API_TOKEN",
+    "secret_key": "UAG_MGMT_SECRET",
     "algorithm": "UAG_ALGORITHM",
     "database_path": "UAG_DATABASE_PATH",
     "max_concurrency": "UAG_MAX_CONCURRENCY",
@@ -34,23 +33,15 @@ _FIELD_ENV_MAP = {
     "log_max_bytes": "UAG_LOG_MAX_BYTES",
     "log_backup_count": "UAG_LOG_BACKUP_COUNT",
     "log_retention_days": "UAG_LOG_RETENTION_DAYS",
-    "default_tpm_limit": "UAG_DEFAULT_TPM_LIMIT",
-    "default_rpd_limit": "UAG_DEFAULT_RPD_LIMIT",
-    "default_hourly_limit": "UAG_DEFAULT_HOURLY_LIMIT",
-    "default_weekly_limit": "UAG_DEFAULT_WEEKLY_LIMIT",
-    "codex_billing_api_key": "UAG_CODEX_BILLING_API_KEY",
-    "codex_usage_endpoints": "UAG_CODEX_USAGE_ENDPOINTS",
-    "codex_oauth_url": "UAG_CODEX_OAUTH_URL",
+    "cli_capture_enabled": "UAG_CLI_CAPTURE_ENABLED",
+    "cli_capture_root": "UAG_CLI_CAPTURE_ROOT",
+    "framework_log_level": "UAG_FRAMEWORK_LOG_LEVEL",
     "codex_default_model": "UAG_CODEX_DEFAULT_MODEL",
     "codex_stall_timeout_seconds": "UAG_CODEX_STALL_TIMEOUT_SECONDS",
-    "gemini_billing_api_key": "UAG_GEMINI_BILLING_API_KEY",
-    "gemini_usage_endpoints": "UAG_GEMINI_USAGE_ENDPOINTS",
     "gemini_default_model": "UAG_GEMINI_DEFAULT_MODEL",
     "gemini_stall_timeout_seconds": "UAG_GEMINI_STALL_TIMEOUT_SECONDS",
     "opencode_default_model": "UAG_OPENCODE_DEFAULT_MODEL",
     "opencode_stall_timeout_seconds": "UAG_OPENCODE_STALL_TIMEOUT_SECONDS",
-    "gemini_base_url": "GEMINI_BASE_URL",
-    "isolated_envs_root": "UAG_ISOLATED_ENVS_ROOT",
     "release_check_enabled": "UAG_RELEASE_CHECK_ENABLED",
     "release_repository": "UAG_RELEASE_REPOSITORY",
     "release_api_base_url": "UAG_RELEASE_API_BASE_URL",
@@ -72,24 +63,17 @@ _CONFIG_BLOCK_FIELD_MAP: Dict[Tuple[str, ...], str] = {
     ("orchestrator", "session_ttl_hours"): "session_ttl_hours",
     ("workspace", "lock_timeout"): "workspace_lock_timeout",
     ("workspace", "root"): "workspaces_root",
-    ("workspace", "isolated_envs_root"): "isolated_envs_root",
     ("logging", "root"): "logs_root",
     ("logging", "max_bytes"): "log_max_bytes",
     ("logging", "backup_count"): "log_backup_count",
     ("logging", "persistence_backend"): "log_persistence_backend",
     ("logging", "runtime_root"): "runtime_log_root",
     ("logging", "retention_days"): "log_retention_days",
-    ("limits", "default_tpm_limit"): "default_tpm_limit",
-    ("limits", "default_rpd_limit"): "default_rpd_limit",
-    ("limits", "default_hourly_limit"): "default_hourly_limit",
-    ("limits", "default_weekly_limit"): "default_weekly_limit",
-    ("providers", "codex", "billing_api_key"): "codex_billing_api_key",
-    ("providers", "codex", "usage_endpoints"): "codex_usage_endpoints",
-    ("providers", "codex", "oauth_url"): "codex_oauth_url",
+    ("logging", "cli_capture_enabled"): "cli_capture_enabled",
+    ("logging", "cli_capture_root"): "cli_capture_root",
+    ("logging", "framework_level"): "framework_log_level",
     ("providers", "codex", "default_model"): "codex_default_model",
     ("providers", "codex", "stall_timeout_seconds"): "codex_stall_timeout_seconds",
-    ("providers", "gemini", "billing_api_key"): "gemini_billing_api_key",
-    ("providers", "gemini", "usage_endpoints"): "gemini_usage_endpoints",
     ("providers", "gemini", "default_model"): "gemini_default_model",
     ("providers", "gemini", "stall_timeout_seconds"): "gemini_stall_timeout_seconds",
     ("providers", "gemini", "base_url"): "gemini_base_url",
@@ -173,101 +157,46 @@ class Settings(BaseSettings):
     log_backup_count: int = Field(default=5, validation_alias="UAG_LOG_BACKUP_COUNT")
     log_persistence_backend: str = Field(default="datetime_file")
     runtime_log_root: str = Field(default="runtime")
+    audit_log_root: str = Field(default="audit")
     log_retention_days: int = Field(default=30, validation_alias="UAG_LOG_RETENTION_DAYS")
+    cli_capture_enabled: bool = Field(default=True, validation_alias="UAG_CLI_CAPTURE_ENABLED")
+    cli_capture_root: str = Field(default="cli-runs", validation_alias="UAG_CLI_CAPTURE_ROOT")
+    framework_log_level: Optional[str] = Field(default=None, validation_alias="UAG_FRAMEWORK_LOG_LEVEL")
 
-    # Rate Limits (defaults - can be overridden per account)
-    default_tpm_limit: int = Field(default=100000, validation_alias="UAG_DEFAULT_TPM_LIMIT")
-    default_rpd_limit: int = Field(default=5000, validation_alias="UAG_DEFAULT_RPD_LIMIT")
-    default_hourly_limit: int = Field(default=50000, validation_alias="UAG_DEFAULT_HOURLY_LIMIT")
-    default_weekly_limit: int = Field(default=1000000, validation_alias="UAG_DEFAULT_WEEKLY_LIMIT")
-
-    # Isolation
-    isolated_envs_root: Optional[str] = Field(default=None, validation_alias="UAG_ISOLATED_ENVS_ROOT")
-
-    # Billing credentials (fallback only; OAuth session tokens are preferred when present)
-    codex_billing_api_key: Optional[str] = Field(default=None, validation_alias="UAG_CODEX_BILLING_API_KEY")
-    codex_usage_endpoints: str = Field(
-        default="https://chatgpt.com/backend-api/wham/usage,https://api.openai.com/dashboard/codex/usage",
-        validation_alias="UAG_CODEX_USAGE_ENDPOINTS",
-    )
-    codex_oauth_url: str = Field(default="https://auth0.openai.com/oauth/token", validation_alias="UAG_CODEX_OAUTH_URL")
+    # Provider configurations
     codex_default_model: str = Field(default="gpt-5-codex", validation_alias="UAG_CODEX_DEFAULT_MODEL")
     codex_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_CODEX_STALL_TIMEOUT_SECONDS")
-    gemini_billing_api_key: Optional[str] = Field(default=None, validation_alias="UAG_GEMINI_BILLING_API_KEY")
-    gemini_usage_endpoints: str = Field(
-        default="https://gemini.google.com/backend-api/wham/usage,https://aistudio.google.com/backend-api/wham/usage,https://api.gemini.ai/v1/usage",
-        validation_alias="UAG_GEMINI_USAGE_ENDPOINTS",
-    )
     gemini_default_model: str = Field(default="gemini-2.5-pro", validation_alias="UAG_GEMINI_DEFAULT_MODEL")
     gemini_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_GEMINI_STALL_TIMEOUT_SECONDS")
     opencode_default_model: str = Field(default="opencode/big-pickle", validation_alias="UAG_OPENCODE_DEFAULT_MODEL")
     opencode_stall_timeout_seconds: int = Field(default=600, validation_alias="UAG_OPENCODE_STALL_TIMEOUT_SECONDS")
-
-    # Provider-specific settings
     gemini_base_url: str = Field(default="https://api.gemini.ai", validation_alias="GEMINI_BASE_URL")
 
-    # Redis (for production deployment)
-    redis_url: Optional[str] = Field(default=None, validation_alias="REDIS_URL")
-
-    # Release/update checks
+    # Update checks
     release_check_enabled: bool = Field(default=False, validation_alias="UAG_RELEASE_CHECK_ENABLED")
-    release_repository: Optional[str] = Field(default=None, validation_alias="UAG_RELEASE_REPOSITORY")
+    release_repository: str = Field(default="", validation_alias="UAG_RELEASE_REPOSITORY")
     release_api_base_url: str = Field(default="https://api.github.com", validation_alias="UAG_RELEASE_API_BASE_URL")
     release_check_timeout_seconds: int = Field(default=3, validation_alias="UAG_RELEASE_CHECK_TIMEOUT_SECONDS")
-    release_check_cache_ttl_seconds: int = Field(default=6 * 60 * 60, validation_alias="UAG_RELEASE_CHECK_CACHE_TTL_SECONDS")
+    release_check_cache_ttl_seconds: int = Field(default=21600, validation_alias="UAG_RELEASE_CHECK_CACHE_TTL_SECONDS")
+
+    # Infrastructure
+    redis_url: Optional[str] = Field(default=None, validation_alias="REDIS_URL")
 
     # Telemetry
-    telemetry_enabled: bool = Field(default=True)
-    telemetry_persist_traces: bool = Field(default=True)
-    telemetry_json_logs: bool = Field(default=True)
-    telemetry_max_attr_length: int = Field(default=512)
-    telemetry_persistence_backend: str = Field(default="file")
-    telemetry_trace_root: str = Field(default="traces")
-    telemetry_trace_retention_days: int = Field(default=30)
+    telemetry_enabled: bool = Field(default=True, validation_alias="UAG_TELEMETRY_ENABLED")
+    telemetry_persist_traces: bool = Field(default=True, validation_alias="UAG_TELEMETRY_PERSIST_TRACES")
+    telemetry_json_logs: bool = Field(default=True, validation_alias="UAG_TELEMETRY_JSON_LOGS")
+    telemetry_max_attr_length: int = Field(default=512, validation_alias="UAG_TELEMETRY_MAX_ATTR_LENGTH")
+    telemetry_persistence_backend: str = Field(default="file", validation_alias="UAG_TELEMETRY_PERSISTENCE_BACKEND")
+    telemetry_trace_root: str = Field(default="traces", validation_alias="UAG_TELEMETRY_TRACE_ROOT")
+    telemetry_trace_retention_days: int = Field(default=30, validation_alias="UAG_TELEMETRY_TRACE_RETENTION_DAYS")
 
-    # Channel settings
     channels: ChannelsSettings = Field(default_factory=ChannelsSettings)
-
-def load_config_from_file(config_path: str) -> Dict[str, Any]:
-    """
-    Load configuration from a TOML, YAML, or JSON file.
-
-    Args:
-        config_path: Path to the configuration file
-
-    Returns:
-        Dictionary with configuration values
-    """
-    path = Path(config_path)
-    if not path.exists():
-        return {}
-
-    if path.suffix.lower() == ".toml":
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-        return _flatten_config(data) if isinstance(data, dict) else {}
-    if path.suffix.lower() in [".yaml", ".yml"]:
-        try:
-            import yaml
-
-            data = yaml.safe_load(path.read_text()) or {}
-            return _flatten_config(data) if isinstance(data, dict) else {}
-        except ImportError:
-            raise ImportError("PyYAML is required to load YAML config files")
-    if path.suffix.lower() == ".json":
-        import json
-
-        data = json.loads(path.read_text())
-        return _flatten_config(data) if isinstance(data, dict) else {}
-    raise ValueError(f"Unsupported config file format: {path.suffix}")
 
 
 def get_config_dir() -> Path:
-    """Return the directory used for persistent Codara config state."""
-    override = os.getenv(CONFIG_DIR_ENV_VAR)
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".config" / DEFAULT_CONFIG_DIRNAME
+    """Resolve the central Codara config directory (shared vault & settings)."""
+    return Path("~/.codara").expanduser()
 
 
 def get_config_path() -> Path:
@@ -280,6 +209,10 @@ def get_config_path() -> Path:
     if cwd_path.exists():
         return cwd_path
 
+    configs_path = Path.cwd() / "configs" / DEFAULT_CONFIG_FILENAME
+    if configs_path.exists():
+        return configs_path
+
     home_path = get_config_dir() / DEFAULT_CONFIG_FILENAME
     if home_path.exists():
         return home_path
@@ -287,75 +220,32 @@ def get_config_path() -> Path:
     return cwd_path
 
 
-def _flatten_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize nested block config into the flat Settings schema."""
-    flattened: Dict[str, Any] = {}
+def load_settings(config_path: Optional[Path] = None) -> Settings:
+    """Load settings from environment variables and an optional TOML file."""
+    if not config_path:
+        config_path = get_config_path()
 
-    def visit(value: Any, path: Tuple[str, ...]) -> None:
-        if path == ("channels",) and isinstance(value, dict):
-            flattened["channels"] = value
-            return
-        mapped_key = _CONFIG_BLOCK_FIELD_MAP.get(path)
-        if mapped_key is not None:
-            flattened[mapped_key] = value
-            return
-        if len(path) == 1 and path[0] in _SETTINGS_FIELDS and not isinstance(value, dict):
-            # Backward-compatible support for legacy flat config files.
-            flattened[path[0]] = value
-            return
-        if isinstance(value, dict):
-            for child_key, child_value in value.items():
-                visit(child_value, path + (child_key,))
+    config_values: Dict[str, Any] = {}
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
+            config_values = _flatten_config(data)
 
-    for key, value in data.items():
-        visit(value, (key,))
-    return flattened
+    # Use resolve paths for directories mentioned in the config
+    config_values = _resolve_path_like_settings(config_values, config_path)
 
-
-def _resolve_path_like_settings(config_values: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
-    resolved = dict(config_values)
-    base_dir = config_path.parent.resolve()
-    for key in ("database_path", "workspaces_root", "isolated_envs_root", "logs_root"):
-        value = resolved.get(key)
-        if not isinstance(value, str) or not value.strip():
-            continue
-        candidate = Path(value).expanduser()
-        if not candidate.is_absolute():
-            resolved[key] = str((base_dir / candidate).resolve())
-    for key in ("codex_billing_api_key", "gemini_billing_api_key", "redis_url", "release_repository"):
-        if resolved.get(key) == "":
-            resolved[key] = None
-    return resolved
-
-
-def _env_override_present(key: str) -> bool:
-    env_name = _FIELD_ENV_MAP.get(key)
-    if key == "secret_key":
-        return os.getenv("API_TOKEN") is not None or os.getenv("UAG_MGMT_SECRET") is not None
-    return bool(env_name and os.getenv(env_name) is not None)
-
-
-def load_settings(config_path: Optional[str] = None) -> "Settings":
-    """Load settings from env vars and the central config file."""
+    # Initialize Settings (Pydantic will handle ENV overrides)
     settings = Settings()
 
-    path = Path(config_path).expanduser() if config_path else get_config_path()
-    config_values = load_config_from_file(str(path)) if path.exists() else {}
-    if path.exists():
-        config_values = _resolve_path_like_settings(config_values, path)
-
+    # Manual update for fields found in TOML
     for key, value in config_values.items():
-        if _env_override_present(key):
+        if _is_override_present(key):
             continue
         if key == "channels":
             settings.channels = ChannelsSettings.model_validate(value)
             continue
         if hasattr(settings, key):
             setattr(settings, key, value)
-
-    # Default isolated_envs_root to be inside workspaces_root if not set
-    if not settings.isolated_envs_root:
-        settings.isolated_envs_root = str(Path(settings.workspaces_root) / "isolated_envs")
 
     return settings
 
@@ -364,42 +254,93 @@ _settings: Optional[Settings] = None
 
 
 def get_settings(force_reload: bool = False) -> Settings:
-    """Get the cached settings instance, reloading if requested."""
-    global _settings, settings
-    if force_reload or _settings is None:
+    """Get the global application settings instance."""
+    global _settings
+    if _settings is None or force_reload:
         _settings = load_settings()
-        settings = _settings
     return _settings
 
 
-# Global settings instance
-settings = get_settings()
+def _flatten_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert block-based TOML structure into a flat dict mapping to Settings fields."""
+    flat: Dict[str, Any] = {}
+
+    # Handle standard nested blocks
+    for path, field_name in _CONFIG_BLOCK_FIELD_MAP.items():
+        val = data
+        for part in path:
+            if isinstance(val, dict):
+                val = val.get(part)
+            else:
+                val = None
+                break
+        if val is not None:
+            flat[field_name] = val
+
+    # Special case for channels (complex structure)
+    if "channels" in data:
+        flat["channels"] = data["channels"]
+
+    return flat
 
 
-def get_telegram_bot_config(bot_name: str, current_settings: Optional[Settings] = None) -> Optional[TelegramBotSettings]:
-    settings_obj = current_settings or get_settings()
-    telegram = settings_obj.channels.telegram
-    for bot in telegram.bots:
-        if bot.name == bot_name:
-            return bot
-    return None
+def _resolve_path_like_settings(config_values: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
+    resolved = dict(config_values)
+    project_root = Path.cwd().resolve()
+    try:
+        config_resolved = config_path.expanduser().resolve()
+    except FileNotFoundError:
+        config_resolved = config_path.expanduser().absolute()
+    # If the config file lives in the current project (including `configs/`),
+    # resolve relative paths from the project root instead of the config dir.
+    # This keeps `data/`, `logs/`, and `workspaces/` stable regardless of whether
+    # the user places `codara.toml` at repo root or under `configs/`.
+    if config_resolved.is_relative_to(project_root):
+        base_dir = project_root
+    else:
+        base_dir = config_resolved.parent.resolve()
+    for key in ("database_path", "workspaces_root", "logs_root"):
+        value = resolved.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = (base_dir / candidate).resolve()
+        resolved[key] = str(candidate)
+    return resolved
 
 
-_PROVIDER_DEFAULT_MODEL_FIELDS = {
-    ProviderType.CODEX: "codex_default_model",
-    ProviderType.GEMINI: "gemini_default_model",
-    ProviderType.OPENCODE: "opencode_default_model",
-}
+def _is_override_present(field_name: str) -> bool:
+    env_var = _FIELD_ENV_MAP.get(field_name)
+    return env_var is not None and env_var in os.environ
 
 
 def get_provider_default_model(provider: ProviderType, current_settings: Optional[Settings] = None) -> str:
-    settings_obj = current_settings or get_settings()
-    return str(getattr(settings_obj, _PROVIDER_DEFAULT_MODEL_FIELDS[provider]))
+    s = current_settings or get_settings()
+    if provider == ProviderType.CODEX:
+        return s.codex_default_model
+    if provider == ProviderType.GEMINI:
+        return s.gemini_default_model
+    if provider == ProviderType.OPENCODE:
+        return s.opencode_default_model
+    return ""
+
+
+def update_settings(config_dict: Dict[str, Any]) -> None:
+    """
+    Force-update live settings. Useful for testing or dynamic reconfig.
+    """
+    global _settings, settings
+    target = _settings or settings
+    # Update settings with values from dict
+    for key, value in config_dict.items():
+        if hasattr(target, key):
+            setattr(target, key, value)
 
 
 def resolve_provider_model(
     provider: ProviderType,
-    requested_model: Optional[str],
+    requested_model: Optional[str] = None,
     current_settings: Optional[Settings] = None,
 ) -> str:
     stripped = (requested_model or "").strip()
@@ -408,16 +349,9 @@ def resolve_provider_model(
     return stripped
 
 
-def update_settings_from_dict(config_dict: Dict[str, Any]) -> None:
-    """
-    Update global settings from a dictionary.
-
-    Args:
-        config_dict: Dictionary with configuration values
-    """
-    global _settings, settings
-    target = _settings or settings
-    # Update settings with values from dict
-    for key, value in config_dict.items():
-        if hasattr(target, key):
-            setattr(target, key, value)
+def get_telegram_bot_config(bot_name: str, current_settings: Optional[Settings] = None) -> Optional[TelegramBotSettings]:
+    s = current_settings or get_settings()
+    for bot in s.channels.telegram.bots:
+        if bot.name == bot_name:
+            return bot
+    return None

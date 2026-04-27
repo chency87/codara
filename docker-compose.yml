@@ -24,7 +24,6 @@ services:
       UAG_CONFIG_DIR: /config
       UAG_DATABASE_PATH: /data/codara.db
       UAG_WORKSPACES_ROOT: /workspaces
-      UAG_ISOLATED_ENVS_ROOT: /workspaces/isolated_envs
       UAG_LOGS_ROOT: /logs
 
       API_TOKEN: ${API_TOKEN:-change-me-before-production}
@@ -41,20 +40,18 @@ services:
       - codara_config:/config
       - codara_logs:/logs
       - codara_workspaces:/workspaces
-      - ./codara.toml:/config/codara.toml:ro
+      # Map the example config if the real one is missing, 
+      # but in a real deployment user should provide their own codara.toml
+      - ./configs/codara.toml.example:/config/codara.toml:ro
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/management/v1/health >/dev/null || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/management/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp:exec,size=256m
     networks:
       - codara
 

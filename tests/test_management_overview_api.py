@@ -1,13 +1,9 @@
-from datetime import datetime, timedelta
-
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-
 import codara.gateway.app as gateway_app
-from codara.accounts.pool import AccountPool
-from codara.core.models import Account, AccountStatus, AuthType, ProviderType, Session, SessionStatus
+from codara.core.models import ProviderType, Session, SessionStatus, User, UserStatus, Workspace
 from codara.database.manager import DatabaseManager
 from tests.helpers import operator_headers
-
 
 def test_management_overview_summarizes_visible_runtime_state(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"
@@ -18,55 +14,54 @@ def test_management_overview_summarizes_visible_runtime_state(tmp_path, monkeypa
     gateway_app.clear_auth_caches()
     gateway_app.db_manager = DatabaseManager(str(db_path))
 
-    pool = AccountPool(gateway_app.db_manager)
-    pool.register_account(
-        Account(
-            account_id="codex-visible",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.API_KEY,
-            label="Codex Visible",
-            status=AccountStatus.COOLDOWN.value,
-            cooldown_until=datetime.now() + timedelta(minutes=10),
-        ),
-        "sk-visible",
-    )
-    pool.register_account(
-        Account(
-            account_id="codex-system",
-            provider=ProviderType.CODEX,
-            auth_type=AuthType.OAUTH_SESSION,
-            label="Codex System",
-            inventory_source="system",
-        ),
-        '{"tokens":{"access_token":"system"}}',
-    )
+    now = datetime.now(timezone.utc)
+    gateway_app.db_manager.save_user(User(
+        user_id="user-1",
+        email="test@example.com",
+        display_name="Test User",
+        status=UserStatus.ACTIVE,
+        workspace_path=str(tmp_path / "user-1"),
+        created_at=now,
+        created_by="test",
+        updated_at=now
+    ))
+    gateway_app.db_manager.save_workspace(Workspace(
+        workspace_id="wsk-1",
+        name="default",
+        path=str(tmp_path / "workspace"),
+        user_id="user-1",
+        created_at=now,
+        updated_at=now
+    ))
 
     gateway_app.db_manager.save_session(
         Session(
+            session_id="sess-active",
+            workspace_id="wsk-1",
+            user_id="user-1",
             client_session_id="sess-active",
             backend_id="backend-1",
             provider=ProviderType.CODEX,
-            account_id="codex-visible",
             cwd_path=str(tmp_path),
-            prefix_hash="abc",
             status=SessionStatus.ACTIVE,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=1),
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(hours=1),
         )
     )
     gateway_app.db_manager.save_session(
         Session(
+            session_id="sess-dirty",
+            workspace_id="wsk-1",
+            user_id="user-1",
             client_session_id="sess-dirty",
             backend_id="backend-2",
             provider=ProviderType.CODEX,
-            account_id="codex-visible",
             cwd_path=str(tmp_path),
-            prefix_hash="def",
             status=SessionStatus.DIRTY,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-            expires_at=datetime.now() + timedelta(hours=1),
+            created_at=now,
+            updated_at=now,
+            expires_at=now + timedelta(hours=1),
         )
     )
 
@@ -77,23 +72,16 @@ def test_management_overview_summarizes_visible_runtime_state(tmp_path, monkeypa
 
     assert resp.status_code == 200
     payload = resp.json()["data"]
-    assert payload["health"]["status"] == "degraded"
     assert payload["summary"]["sessions_total"] == 2
     assert payload["summary"]["active_sessions"] == 1
     assert payload["summary"]["dirty_sessions"] == 1
-    assert payload["summary"]["accounts_total"] == 1
-    assert payload["summary"]["cooldown_accounts"] == 1
-    assert payload["summary"]["accounts_available"] == 0
-    assert payload["summary"]["expired_accounts"] == 0
     assert payload["health"]["components"]["gateway"]["latency_ms"] is not None
     assert payload["health"]["components"]["orchestrator"]["latency_ms"] is not None
     assert payload["health"]["components"]["state_store"]["latency_ms"] is not None
     assert payload["version"]["name"] == "codara"
     assert payload["version"]["version"]
     assert payload["version"]["release_check"]["enabled"] is False
-    assert payload["providers"][0]["provider"] == "codex"
-    assert payload["providers"][0]["accounts_total"] == 1
-
+    
 
 def test_management_version_endpoint_can_check_updates(tmp_path, monkeypatch):
     db_path = tmp_path / "codara.db"

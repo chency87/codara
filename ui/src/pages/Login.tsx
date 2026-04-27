@@ -2,32 +2,20 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layers, ShieldAlert, Key } from 'lucide-react';
 import axios from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
 
 const Login = () => {
   const [passkey, setPasskey] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     try {
-      // Use a clean axios call that doesn't use the global interceptors
-      // to avoid sending stale tokens that might trigger 401s on the auth endpoint
-      const resp = await axios({
-        method: 'post',
-        url: '/management/v1/auth/token',
-        data: { operator_secret: passkey },
-        transformRequest: [(data) => JSON.stringify(data)],
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      // Extract tokens from the standard envelope .data field
-      const authData = resp.data.data;
-      sessionStorage.setItem('uag_token', authData.access_token);
-      if (authData.refresh_token) {
-        sessionStorage.setItem('uag_refresh_token', authData.refresh_token);
-      }
+      await axios.post('/management/v1/auth/token', { operator_secret: passkey });
+      queryClient.clear();
       navigate('/');
     } catch {
       setError('Authentication failed. Use the API_TOKEN value from your .env file.');

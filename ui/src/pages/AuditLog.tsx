@@ -1,129 +1,72 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { History, User, Search, Fingerprint, ChevronDown, ChevronUp, Code } from 'lucide-react';
-import CursorPagination from '../components/CursorPagination';
+import { Search, RefreshCw } from 'lucide-react';
 import type { ApiEnvelope, AuditLogRecord } from '../types/api';
 
 const PAGE_SIZE = 25;
 
-const getErrorMessage = (error: unknown) => {
-  if (axios.isAxiosError(error)) {
-    return error.response?.data?.detail || error.response?.data?.message || error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return 'Request failed';
+const ACTION_COLORS: Record<string, string> = {
+  'created': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  'updated': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  'deleted': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  'removed': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  'terminated': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  'suspended': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  'failed': 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  'rotated': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  'reset': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
 };
 
-const formatState = (value?: string | null, emptyLabel = '// No state recorded') => {
-  if (!value) return emptyLabel;
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2);
-  } catch {
-    return value;
-  }
+const actionColor = (action: string) => {
+  const key = Object.keys(ACTION_COLORS).find(k => action.toLowerCase().includes(k));
+  return key ? ACTION_COLORS[key] : 'bg-slate-800 text-slate-400 border-slate-700';
 };
 
-const AuditRow = ({ log }: { log: AuditLogRecord }) => {
-  const [expanded, setExpanded] = useState(false);
+const formatTime = (ts: number) => {
+  const d = new Date(ts * 1000);
+  return d.toLocaleString('en-US', { 
+    month: 'short', day: 'numeric', 
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false 
+  });
+};
 
-  return (
-    <div className="border-b border-slate-800/40 last:border-0 group">
-      <div 
-        className="px-8 py-6 flex items-center justify-between cursor-pointer hover:bg-white/[0.01] transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center space-x-6">
-          <div className="text-[10px] font-black text-slate-600 tabular-nums uppercase w-32">
-            {new Date(log.timestamp * 1000).toLocaleString()}
-          </div>
-          <div className="flex items-center space-x-2 w-48">
-            <User size={12} className="text-slate-500" />
-            <span className="text-xs font-bold text-slate-300">{log.actor}</span>
-          </div>
-          <div className="w-48">
-            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
-              log.action.includes('removed') || log.action.includes('terminated') 
-                ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' 
-                : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-            }`}>
-              {log.action}
-            </span>
-          </div>
-          <div className="flex items-center space-x-2 text-slate-500">
-            <Fingerprint size={12} />
-            <span className="text-[10px] font-mono tabular-nums">{log.target_type}:{log.target_id}</span>
-          </div>
-        </div>
-        {expanded ? <ChevronUp size={16} className="text-slate-600" /> : <ChevronDown size={16} className="text-slate-600" />}
-      </div>
-
-      {expanded && (
-        <div className="px-8 pb-8 pt-2 grid grid-cols-2 gap-8 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center space-x-2">
-              <Code size={12} />
-              <span>Before State</span>
-            </h4>
-            <pre className="bg-black border border-slate-800 rounded-2xl p-4 text-[10px] font-mono text-slate-400 overflow-auto max-h-60">
-              {formatState(log.before_state, '// No previous state recorded')}
-            </pre>
-          </div>
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center space-x-2">
-              <Code size={12} className="text-blue-500" />
-              <span>After State</span>
-            </h4>
-            <pre className="bg-black border border-slate-800 rounded-2xl p-4 text-[10px] font-mono text-blue-400 overflow-auto max-h-60 shadow-[0_0_30px_rgba(37,99,235,0.05)]">
-              {formatState(log.after_state, '// No final state recorded')}
-            </pre>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const ActorBadge = ({ actor }: { actor: string }) => {
+  if (actor.startsWith('operator:')) {
+    return <span className="text-blue-400">operator</span>;
+  }
+  if (actor.startsWith('system:')) {
+    return <span className="text-amber-400">system</span>;
+  }
+  if (actor.startsWith('user:')) {
+    return <span className="text-emerald-400">user</span>;
+  }
+  return <span className="text-slate-400">{actor}</span>;
 };
 
 const AuditLog = () => {
   const [cursor, setCursor] = useState<string | null>(null);
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([]);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [actor, setActor] = useState('');
-  const [action, setAction] = useState('');
-  const [targetType, setTargetType] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const resetPagination = () => {
-    setCursor(null);
-    setCursorHistory([]);
-  };
-
-  const { data, isLoading, error } = useQuery<ApiEnvelope<AuditLogRecord[]>>({
-    queryKey: ['audit-logs', cursor, search, actor, action, targetType],
+  const { data, isLoading, error, refetch } = useQuery<ApiEnvelope<AuditLogRecord[]>>({
+    queryKey: ['audit-logs', cursor, search, refreshKey],
     queryFn: async () => {
       const resp = await axios.get('/management/v1/audit', {
         params: {
           limit: PAGE_SIZE,
           after: cursor || undefined,
           search: search.trim() || undefined,
-          actor: actor.trim() || undefined,
-          action: action.trim() || undefined,
-          target_type: targetType || undefined,
         },
       });
       return resp.data;
-    }
+    },
   });
 
-  const logs = useMemo(() => data?.data || [], [data]);
+  const logs = data?.data || [];
   const pageMeta = data?.meta?.page;
-  const visibleSummary = useMemo(() => ({
-    operator: logs.filter((log) => String(log.actor || '').startsWith('operator:')).length,
-    system: logs.filter((log) => String(log.actor || '').startsWith('system:')).length,
-    user: logs.filter((log) => String(log.actor || '').startsWith('user:')).length,
-    sessions: logs.filter((log) => log.target_type === 'session').length,
-  }), [logs]);
   const canGoBack = cursorHistory.length > 0;
   const canGoNext = logs.length === PAGE_SIZE && Boolean(pageMeta?.cursor);
 
@@ -140,125 +83,140 @@ const AuditLog = () => {
     setCursor(previousCursor);
   };
 
+  const handleRefresh = () => {
+    setCursor(null);
+    setCursorHistory([]);
+    setRefreshKey(prev => prev + 1);
+  };
+
+  const handleSearch = (value: string) => {
+    setCursor(null);
+    setCursorHistory([]);
+    setSearch(value);
+  };
+
+  if (error) {
+    return (
+      <div className="p-12">
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm font-medium text-rose-200">
+          Failed to load audit logs
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="mb-12">
-        <h2 className="text-4xl font-black tracking-tight text-white mb-2">Audit Control</h2>
-        <p className="text-slate-500 font-medium">Immutable ledger of management mutations and operator interventions.</p>
+    <div className="p-6 sm:p-8 lg:p-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <header className="mb-8">
+        <h2 className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-2">Audit Log</h2>
+        <p className="text-slate-500 font-medium">Track all management actions and system changes.</p>
       </header>
 
-      {error && (
-        <div className="mb-6 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-5 py-4 text-sm font-medium text-rose-200">
-          Audit loading failed: {getErrorMessage(error)}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search logs..."
+            className="w-full pl-9 pr-4 py-2.5 bg-slate-900/60 border border-slate-800 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500/50"
+          />
         </div>
-      )}
-
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        {[
-          ['Visible events', logs.length],
-          ['Operator actions', visibleSummary.operator],
-          ['System events', visibleSummary.system],
-          ['Session events', visibleSummary.sessions],
-        ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</div>
-            <div className="mt-2 text-2xl font-black text-white">{value as number}</div>
-          </div>
-        ))}
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={isLoading}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:border-slate-600 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+        <div className="text-sm text-slate-500 sm:ml-auto">
+          {pageMeta?.total_count ?? logs.length} entries
+        </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6 md:grid-cols-4">
-        <label className="space-y-2">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Search</span>
-          <div className="relative">
-            <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              className="w-full rounded-xl border border-slate-800 bg-black py-3 pl-10 pr-4 text-sm text-white outline-none focus:border-blue-500"
-              placeholder="action, target id, or payload text"
-              value={search}
-              onChange={(e) => {
-                resetPagination();
-                setSearch(e.target.value);
-              }}
-            />
-          </div>
-        </label>
-        <label className="space-y-2">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Actor</span>
-          <input
-            className="w-full rounded-xl border border-slate-800 bg-black px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
-            placeholder="operator:svc-account-01"
-            value={actor}
-            onChange={(e) => {
-              resetPagination();
-              setActor(e.target.value);
-            }}
-          />
-        </label>
-        <label className="space-y-2">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Action</span>
-          <input
-            className="w-full rounded-xl border border-slate-800 bg-black px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
-            placeholder="usage.fetch.failed"
-            value={action}
-            onChange={(e) => {
-              resetPagination();
-              setAction(e.target.value);
-            }}
-          />
-        </label>
-        <label className="space-y-2">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Target Type</span>
-          <select
-            className="w-full rounded-xl border border-slate-800 bg-black px-4 py-3 text-sm text-white outline-none focus:border-blue-500"
-            value={targetType}
-            onChange={(e) => {
-              resetPagination();
-              setTargetType(e.target.value);
-            }}
-          >
-            <option value="">All targets</option>
-            <option value="account">account</option>
-            <option value="usage">usage</option>
-            <option value="session">session</option>
-            <option value="user">user</option>
-            <option value="api_key">api_key</option>
-          </select>
-        </label>
-      </div>
+      <div className="bg-slate-900/40 border border-slate-800/60 rounded-3xl overflow-hidden">
+        <div className="overflow-x-auto custom-scrollbar">
+          <div className="min-w-[800px]">
+            <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-800/30 border-b border-slate-800/60 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+              <div className="col-span-2">Time</div>
+              <div className="col-span-2">Actor</div>
+              <div className="col-span-2">Action</div>
+              <div className="col-span-4">Target</div>
+              <div className="col-span-2 text-right">Changes</div>
+            </div>
 
-      <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/60 rounded-3xl overflow-hidden shadow-2xl">
-        <div className="bg-slate-800/30 border-b border-slate-800/60 px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <History size={18} className="text-blue-500" />
-            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Mutation Log</span>
+            <div className="divide-y divide-slate-800/40 max-h-[600px] overflow-y-auto">
+              {isLoading ? (
+                <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs animate-pulse">
+                  Loading...
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="px-6 py-12 text-center text-slate-600 font-bold uppercase tracking-widest text-xs">
+                  No audit entries
+                </div>
+              ) : (
+                logs.map((log) => (
+                  <div 
+                    key={log.audit_id}
+                    className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-white/[0.02] cursor-pointer transition-colors"
+                  >
+                    <div className="col-span-2 text-xs font-mono text-slate-400">
+                      {formatTime(log.timestamp)}
+                    </div>
+                    <div className="col-span-2">
+                      <ActorBadge actor={log.actor} />
+                    </div>
+                    <div className="col-span-2">
+                      <span className={`inline-flex px-2 py-1 rounded-lg text-[10px] font-semibold uppercase border ${actionColor(log.action)}`}>
+                        {log.action}
+                      </span>
+                    </div>
+                    <div className="col-span-4">
+                      <span className="text-xs text-slate-400 font-mono">
+                        {log.target_type}:{log.target_id}
+                      </span>
+                    </div>
+                    <div className="col-span-2 text-right">
+                      <span className="text-[10px] text-slate-500">
+                        {log.before_state ? 'state changed' : 'new'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-          <div className="text-[10px] font-bold text-slate-500 uppercase">{pageMeta?.total_count ?? logs.length} entries in current view</div>
         </div>
-        
-        <div className="divide-y divide-slate-800/40">
-          {isLoading ? (
-            <div className="px-8 py-24 text-center text-slate-600 font-bold uppercase tracking-widest text-xs animate-pulse">
-              Synchronizing Ledger...
-            </div>
-          ) : logs?.length === 0 ? (
-            <div className="px-8 py-24 text-center text-slate-600 font-bold uppercase tracking-widest text-xs">
-              No mutations recorded in current epoch
-            </div>
-          ) : (
-            logs.map((log) => (
-              <AuditRow key={log.audit_id} log={log} />
-            ))
-          )}
+
+        <div className="px-6 py-4 border-t border-slate-800/60 flex items-center justify-between">
+          <div className="text-sm text-slate-500">
+            {pageMeta?.total_count ?? logs.length} entries
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={goToPreviousPage}
+              disabled={!canGoBack}
+              className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-xs text-slate-500 px-2">
+              {canGoBack ? cursorHistory.length + 1 : 1}
+            </span>
+            <button
+              type="button"
+              onClick={goToNextPage}
+              disabled={!canGoNext}
+              className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
         </div>
-        <CursorPagination
-          countLabel={`${pageMeta?.total_count ?? logs.length} total audit entries`}
-          pageLabel={`${logs.length} shown`}
-          canGoBack={canGoBack}
-          canGoNext={canGoNext}
-          onBack={goToPreviousPage}
-          onNext={goToNextPage}
-        />
       </div>
     </div>
   );
