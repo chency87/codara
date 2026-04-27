@@ -5,14 +5,14 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.config import get_settings
-from codara.logging_setup import configure_logging
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
-from codara.runtime_log_store import RuntimeLogStore
-from codara.trace_store import FileTraceStore
-from codara.telemetry import record_event, start_trace
+import amesh.gateway.app as gateway_app
+from amesh.config import get_settings
+from amesh.logging_setup import configure_logging
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
+from amesh.runtime_log_store import RuntimeLogStore
+from amesh.trace_store import FileTraceStore
+from amesh.telemetry import record_event, start_trace
 from tests.helpers import operator_headers
 
 
@@ -154,7 +154,7 @@ def test_management_runtime_logs_endpoint_reads_datetime_shards(tmp_path, monkey
     gateway_app.clear_auth_caches()
 
     with start_trace("logs.api.test", component="tests.logs"):
-        logging.getLogger("codara.tests.logs").warning("runtime logs query test")
+        logging.getLogger("amesh.tests.logs").warning("runtime logs query test")
 
     client = TestClient(gateway_app.app)
     headers = operator_headers(client, secret="unit-test-secret")
@@ -173,7 +173,7 @@ def test_management_runtime_logs_endpoint_reads_datetime_shards(tmp_path, monkey
 
 
 def test_relative_observability_roots_resolve_under_logs_root(tmp_path, monkeypatch):
-    config_path = tmp_path / "codara.toml"
+    config_path = tmp_path / "amesh.toml"
     config_path.write_text(
         "\n".join(
             [

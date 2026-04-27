@@ -1,16 +1,16 @@
-from codara.core.models import Session, ProviderType, SessionStatus
+from amesh.core.models import Session, ProviderType, SessionStatus
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
 
 
 def test_chat_completions_reject_when_user_hits_concurrency_limit(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")

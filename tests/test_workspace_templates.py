@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
-from codara.workspace.manager import WorkspaceManager
-from codara.workspace.service import WorkspaceService
-from codara.database.manager import DatabaseManager
+from amesh.workspace.manager import WorkspaceManager
+from amesh.workspace.service import WorkspaceService
+from amesh.database.manager import DatabaseManager
 
 def test_apply_python_template(tmp_path):
     db_path = tmp_path / "test.db"
@@ -16,7 +16,7 @@ def test_apply_python_template(tmp_path):
     workspace_name = "test-python-app"
     user_id = "user-1"
     
-    from codara.core.models import User, UserStatus
+    from amesh.core.models import User, UserStatus
     from datetime import datetime, timezone
     db_manager.save_user(User(
         user_id=user_id,
@@ -58,7 +58,7 @@ def test_apply_empty_template(tmp_path):
     workspace_name = "test-empty"
     user_id = "user-2"
     
-    from codara.core.models import User, UserStatus
+    from amesh.core.models import User, UserStatus
     from datetime import datetime, timezone
     db_manager.save_user(User(
         user_id=user_id,
@@ -75,7 +75,7 @@ def test_apply_empty_template(tmp_path):
     
     workspace_path = Path(workspace.path)
     
-    # Empty template should have nothing except .codara/ metadata
+    # Empty template should have nothing except .amesh/ metadata
     files = [f.name for f in workspace_path.iterdir() if f.is_file()]
     assert len(files) == 0
-    assert (workspace_path / ".codara").exists()
+    assert (workspace_path / ".amesh").exists()

@@ -1,4 +1,4 @@
-# codara Agent Guide
+# ameshe Agent Guide
 
 This repository was generated from a Copier template. Keep changes small,
 reviewable, and aligned with the project layout.

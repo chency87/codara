@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
-from codara.core.models import ProviderType, Session, SessionStatus, User, UserStatus, Workspace
-from codara.database.manager import DatabaseManager
+from amesh.core.models import ProviderType, Session, SessionStatus, User, UserStatus, Workspace
+from amesh.database.manager import DatabaseManager
 
 
 def test_delete_session_removes_turns_before_parent(tmp_path):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     db = DatabaseManager(str(db_path))
 
     now = datetime.now(timezone.utc)

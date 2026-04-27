@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---------------------------------------------------------------------------
-# Codara production image
+# amesh production image
 #
 # The image builds the Vite dashboard, installs the Python package into a
 # self-contained virtualenv, installs provider CLIs, and includes common
@@ -55,7 +55,7 @@ ARG OPENCODE_CLI_PACKAGE="opencode-ai@latest"
 ARG PNPM_PACKAGE="pnpm@latest"
 ARG NODE_VERSION="24"
 ARG NVM_VERSION="0.40.3"
-ARG USERNAME="codara"
+ARG USERNAME="amesh"
 ARG USER_UID=1000
 ARG USER_GID=1000
 
@@ -69,9 +69,9 @@ ENV VIRTUAL_ENV=/app/.venv \
     PYTHONUNBUFFERED=1 \
     UAG_HOST=0.0.0.0 \
     UAG_PORT=8000 \
-    UAG_CONFIG_PATH=/config/codara.toml \
+    UAG_CONFIG_PATH=/config/amesh.toml \
     UAG_CONFIG_DIR=/config \
-    UAG_DATABASE_PATH=/data/codara.db \
+    UAG_DATABASE_PATH=/data/amesh.db \
     UAG_WORKSPACES_ROOT=/workspaces \
     UAG_LOGS_ROOT=/logs
 
@@ -171,4 +171,4 @@ EXPOSE 8000
 
 # Use tini as init and start the server
 ENTRYPOINT ["tini", "--"]
-CMD ["codara", "dev", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["amesh", "dev", "--host", "0.0.0.0", "--port", "8000"]

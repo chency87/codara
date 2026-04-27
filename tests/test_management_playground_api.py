@@ -1,11 +1,11 @@
-from codara.core.models import TurnResult, ProviderType, Session, SessionStatus
+from amesh.core.models import TurnResult, ProviderType, Session, SessionStatus
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
 from tests.helpers import operator_headers
 
 
@@ -34,7 +34,7 @@ class _FakeAdapter:
         }
 
 def test_management_playground_binds_turns_to_dashboard_admin_user(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -67,7 +67,7 @@ def test_management_playground_binds_turns_to_dashboard_admin_user(tmp_path, mon
     payload = resp.json()
     assert payload["extensions"]["bound_user_display_name"] == "Dashboard Admin"
 
-    admin_user = gateway_app.db_manager.get_user_by_email("dashboard-admin@codara.local")
+    admin_user = gateway_app.db_manager.get_user_by_email("dashboard-admin@amesh.local")
     assert admin_user is not None
 
     session_id = payload["extensions"]["client_session_id"]
@@ -83,11 +83,11 @@ def test_management_playground_binds_turns_to_dashboard_admin_user(tmp_path, mon
 
     users_resp = client.get("/management/v1/users", headers=headers)
     assert users_resp.status_code == 200
-    assert any(item["email"] == "dashboard-admin@codara.local" for item in users_resp.json()["data"])
+    assert any(item["email"] == "dashboard-admin@amesh.local" for item in users_resp.json()["data"])
 
 
 def test_management_playground_accepts_multipart_uploads(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -144,7 +144,7 @@ def test_management_playground_accepts_multipart_uploads(tmp_path, monkeypatch):
 
 
 def test_management_playground_uses_system_gemini_without_bootstrap_account(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -180,7 +180,7 @@ def test_management_playground_uses_system_gemini_without_bootstrap_account(tmp_
 
 
 def test_management_playground_returns_provider_runtime_detail(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -217,7 +217,7 @@ def test_management_playground_returns_provider_runtime_detail(tmp_path, monkeyp
 
 
 def test_management_playground_records_failed_adapter_execution(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -266,7 +266,7 @@ def test_management_playground_records_failed_adapter_execution(tmp_path, monkey
 
 
 def test_management_playground_resets_provider_state_when_session_label_changes_provider(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -360,7 +360,7 @@ def test_management_playground_resets_provider_state_when_session_label_changes_
 
 
 def test_management_provider_models_endpoint_returns_all_providers(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -406,7 +406,7 @@ def test_management_provider_models_endpoint_returns_all_providers(tmp_path, mon
 
 
 def test_management_provider_health_marks_local_clis_ok_without_accounts(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")

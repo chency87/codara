@@ -1,4 +1,4 @@
-from codara.core.atr import ATRModule
+from amesh.core.atr import ATRModule
 
 
 def test_atr_extracts_exact_search_replace_action():

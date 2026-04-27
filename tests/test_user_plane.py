@@ -1,4 +1,4 @@
-from codara.core.models import TurnResult, UagOptions, ProviderType, Session, Message
+from amesh.core.models import TurnResult, UagOptions, ProviderType, Session, Message
 import asyncio
 from pathlib import Path
 import subprocess
@@ -6,16 +6,16 @@ from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.adapters.codex import CodexAdapter
-from codara.database.manager import DatabaseManager
-from codara.orchestrator.engine import Orchestrator
-from codara.workspace.engine import WorkspaceEngine
+import amesh.gateway.app as gateway_app
+from amesh.adapters.codex import CodexAdapter
+from amesh.database.manager import DatabaseManager
+from amesh.orchestrator.engine import Orchestrator
+from amesh.workspace.engine import WorkspaceEngine
 from tests.helpers import operator_headers
 
 
 def test_user_provisioning_and_user_plane(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -70,7 +70,7 @@ def test_user_provisioning_and_user_plane(tmp_path, monkeypatch):
 
 
 def test_user_self_service_requires_api_key(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -87,7 +87,7 @@ def test_user_self_service_requires_api_key(tmp_path, monkeypatch):
         assert resp.status_code == 401
 
 def test_chat_completions_keeps_http_401_for_revoked_key(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -145,7 +145,7 @@ def test_chat_completions_keeps_http_401_for_revoked_key(tmp_path, monkeypatch):
 
 
 def test_rotating_user_key_replaces_current_key_in_user_detail(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -195,7 +195,7 @@ def test_rotating_user_key_replaces_current_key_in_user_detail(tmp_path, monkeyp
     assert any(key.key_id == old_key_id and key.status == "revoked" for key in history)
 
 def test_chat_completions_returns_provider_runtime_detail(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -241,7 +241,7 @@ def test_chat_completions_returns_provider_runtime_detail(tmp_path, monkeypatch)
 
 
 def test_user_workspace_id_resolves_inside_base_workspace(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -319,7 +319,7 @@ def test_user_workspace_id_resolves_inside_base_workspace(tmp_path, monkeypatch)
 
 
 def test_chat_completions_passes_explicit_provider_model(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -376,7 +376,7 @@ def test_chat_completions_passes_explicit_provider_model(tmp_path, monkeypatch):
 
 
 def test_chat_completions_multipart_uploads_are_staged_into_workspace(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -452,7 +452,7 @@ def test_chat_completions_multipart_uploads_are_staged_into_workspace(tmp_path, 
 
 
 def test_manual_mode_response_contains_exact_atr_actions(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -525,7 +525,7 @@ old_value = 2
 
 
 def test_user_workspace_id_rejects_path_traversal(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
@@ -570,7 +570,7 @@ def test_user_workspace_id_rejects_path_traversal(tmp_path, monkeypatch):
 
 
 def test_orchestrator_preserves_gemini_backend_id_between_turns(tmp_path):
-    db = DatabaseManager(str(tmp_path / "codara.db"))
+    db = DatabaseManager(str(tmp_path / "amesh.db"))
     orchestrator = Orchestrator(db)
     observed = []
 
@@ -614,7 +614,7 @@ def test_orchestrator_preserves_gemini_backend_id_between_turns(tmp_path):
 
 
 def test_orchestrator_converts_workspace_diff_into_atr_actions(tmp_path):
-    db = DatabaseManager(str(tmp_path / "codara.db"))
+    db = DatabaseManager(str(tmp_path / "amesh.db"))
     orchestrator = Orchestrator(db)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -657,7 +657,7 @@ def test_orchestrator_converts_workspace_diff_into_atr_actions(tmp_path):
 
 
 def test_orchestrator_reuses_adapter_instances(tmp_path):
-    db = DatabaseManager(str(tmp_path / "codara.db"))
+    db = DatabaseManager(str(tmp_path / "amesh.db"))
     orchestrator = Orchestrator(db)
 
     first = orchestrator._get_adapter(ProviderType.CODEX)
@@ -667,7 +667,7 @@ def test_orchestrator_reuses_adapter_instances(tmp_path):
 
 
 def test_user_provider_models_endpoint_returns_adapter_listings(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")

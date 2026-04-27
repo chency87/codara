@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.cli_run_store import CliRunStore
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.cli_run_store import CliRunStore
 from tests.helpers import operator_headers
 
 
@@ -18,7 +18,7 @@ def test_management_cli_runs_list_and_stream(tmp_path, monkeypatch):
     monkeypatch.setattr(gateway_app.settings, "cli_capture_enabled", True)
     monkeypatch.setattr(gateway_app.settings, "cli_capture_root", "cli-runs")
 
-    gateway_app.db_manager = DatabaseManager(str(tmp_path / "codara.db"))
+    gateway_app.db_manager = DatabaseManager(str(tmp_path / "amesh.db"))
 
     store = CliRunStore(settings=gateway_app.settings)
     session_id = "ses_test"
@@ -78,7 +78,7 @@ def test_management_cli_runs_stream_follow_ends_when_meta_ended(tmp_path, monkey
     monkeypatch.setattr(gateway_app.settings, "cli_capture_enabled", True)
     monkeypatch.setattr(gateway_app.settings, "cli_capture_root", "cli-runs")
 
-    gateway_app.db_manager = DatabaseManager(str(tmp_path / "codara.db"))
+    gateway_app.db_manager = DatabaseManager(str(tmp_path / "amesh.db"))
 
     store = CliRunStore(settings=gateway_app.settings)
     session_id = "ses_test_follow"

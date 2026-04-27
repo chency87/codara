@@ -1,13 +1,13 @@
 from fastapi.testclient import TestClient
 
-import codara.gateway.app as gateway_app
-from codara.config import get_settings
-from codara.core.security import SecretStore
+import amesh.gateway.app as gateway_app
+from amesh.config import get_settings
+from amesh.core.security import SecretStore
 from tests.helpers import operator_headers
 
 
 def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
-    config_file = tmp_path / "codara.toml"
+    config_file = tmp_path / "amesh.toml"
     config_file.write_text(
         "\n".join(
             [
@@ -38,7 +38,7 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
                 "",
                 "[release]",
                 "enabled = true",
-                'repository = "codara/codara"',
+                'repository = "amesh/amesh"',
                 'api_base_url = "https://api.github.test"',
                 "check_timeout_seconds = 7",
                 "check_cache_ttl_seconds = 99",
@@ -83,7 +83,7 @@ def test_toml_config_is_loaded_and_env_overrides(tmp_path, monkeypatch):
     assert settings.gemini_stall_timeout_seconds == 222
     assert settings.opencode_stall_timeout_seconds == 333
     assert settings.release_check_enabled is True
-    assert settings.release_repository == "codara/codara"
+    assert settings.release_repository == "amesh/amesh"
     assert settings.release_api_base_url == "https://api.github.test"
     assert settings.release_check_timeout_seconds == 7
     assert settings.release_check_cache_ttl_seconds == 99
@@ -155,7 +155,7 @@ def test_management_login_reads_api_token_from_dotenv_without_restart(tmp_path, 
 def test_management_login_reads_api_token_next_to_active_config(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    config_path = config_dir / "codara.toml"
+    config_path = config_dir / "amesh.toml"
     config_path.write_text("[server]\nsecret_key = \"config-secret\"\n", encoding="utf-8")
     (config_dir / ".env").write_text("API_TOKEN=config-dir-passkey\n", encoding="utf-8")
 

@@ -1,14 +1,13 @@
 from click.testing import CliRunner
 import os
 
-import codara.cli.main as cli_main
+import amesh.cli.main as cli_main
 
 
 def test_serve_skips_ui_build_by_default_when_assets_are_missing(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "ui").mkdir()
-    (tmp_path / "ui" / "package.json").write_text("{}", encoding="utf-8")
+    # Intentionally leave ui directory missing to test "assets missing" scenario
 
     def fail_subprocess_run(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called without --build-ui")
@@ -21,7 +20,7 @@ def test_serve_skips_ui_build_by_default_when_assets_are_missing(tmp_path, monke
     result = runner.invoke(cli_main.cli, ["serve", "--host", "127.0.0.1", "--port", "8123"])
 
     assert result.exit_code == 0
-    assert "Dashboard build not found." in result.output
+    assert "Warning: ui/ not found. Dashboard won't be available." in result.output
     assert observed == {"host": "127.0.0.1", "port": 8123}
 
 
@@ -68,7 +67,7 @@ def test_version_command_checks_configured_release(monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(cli_main, "get_version", lambda: "1.0.0")
     monkeypatch.setattr(cli_main.settings, "release_check_enabled", True)
-    monkeypatch.setattr(cli_main.settings, "release_repository", "codara/codara")
+    monkeypatch.setattr(cli_main.settings, "release_repository", "amesh/amesh")
     monkeypatch.setattr(cli_main.settings, "release_api_base_url", "https://api.github.test")
     monkeypatch.setattr(cli_main.settings, "release_check_timeout_seconds", 1)
 

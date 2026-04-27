@@ -3,18 +3,18 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 from datetime import datetime, timezone
 
-import codara.cli.main as cli_main
-import codara.gateway.app as gateway_app
-from codara.database.manager import DatabaseManager
-from codara.workspace.manager import WorkspaceManager
-from codara.workspace.service import (
+import amesh.cli.main as cli_main
+import amesh.gateway.app as gateway_app
+from amesh.database.manager import DatabaseManager
+from amesh.workspace.manager import WorkspaceManager
+from amesh.workspace.service import (
     WorkspaceService,
     WORKSPACE_TEMPLATES,
     WORKSPACE_METADATA_DIR,
     WORKSPACE_METADATA_FILE,
     normalize_workspace_name,
 )
-from codara.core.models import User, UserStatus
+from amesh.core.models import User, UserStatus
 from tests.helpers import operator_headers
 
 
@@ -31,7 +31,7 @@ def _setup_user(db_manager: DatabaseManager, workspaces_root: Path, user_id: str
     ))
 
 def test_workspace_service_creates_default_layout(tmp_path):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     db_manager = DatabaseManager(str(db_path))
     workspaces_root = tmp_path / "workspaces"
     workspaces_root.mkdir()
@@ -74,7 +74,7 @@ def test_workspace_service_rejects_unsafe_names():
 
 
 def test_workspace_service_python_template(tmp_path):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     db_manager = DatabaseManager(str(db_path))
     workspaces_root = tmp_path / "workspaces"
     workspaces_root.mkdir()
@@ -92,7 +92,7 @@ def test_workspace_service_python_template(tmp_path):
 
 
 def test_workspace_cli_create_list_and_info(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     db_manager = DatabaseManager(str(db_path))
     workspaces_root = tmp_path / "workspaces"
     workspaces_root.mkdir()
@@ -125,7 +125,7 @@ def test_workspace_cli_create_list_and_info(tmp_path, monkeypatch):
 
 
 def test_management_workspaces_v2_api_create_list_and_detail(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
     workspaces_root = tmp_path / "workspaces"
     workspaces_root.mkdir()
 

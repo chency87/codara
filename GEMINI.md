@@ -1,4 +1,4 @@
-# codara
+# amesh
 
 @.agents/shared.md
 @.agents/rules/avoid-these.md

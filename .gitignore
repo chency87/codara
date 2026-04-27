@@ -29,13 +29,15 @@ logs/
 /workspaces/
 runtime/
 traces/
-codara.db
-codara.toml
+amesh.db
+amesh.toml
 .env
 
 # Local deployment config/examples staging
-configs/codara.toml
+configs/amesh.toml
 configs/data/
 configs/*.db
 
 .egg-info/
+
+docs/

@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-import codara.gateway.app as gateway_app
-from codara.core.models import ProviderType, Session, SessionStatus, User, UserStatus, Workspace
-from codara.database.manager import DatabaseManager
+import amesh.gateway.app as gateway_app
+from amesh.core.models import ProviderType, Session, SessionStatus, User, UserStatus, Workspace
+from amesh.database.manager import DatabaseManager
 from tests.helpers import operator_headers
 
 def test_management_overview_summarizes_visible_runtime_state(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
     gateway_app.settings.secret_key = "unit-test-secret"
@@ -78,18 +78,18 @@ def test_management_overview_summarizes_visible_runtime_state(tmp_path, monkeypa
     assert payload["health"]["components"]["gateway"]["latency_ms"] is not None
     assert payload["health"]["components"]["orchestrator"]["latency_ms"] is not None
     assert payload["health"]["components"]["state_store"]["latency_ms"] is not None
-    assert payload["version"]["name"] == "codara"
+    assert payload["version"]["name"] == "amesh"
     assert payload["version"]["version"]
     assert payload["version"]["release_check"]["enabled"] is False
     
 
 def test_management_version_endpoint_can_check_updates(tmp_path, monkeypatch):
-    db_path = tmp_path / "codara.db"
+    db_path = tmp_path / "amesh.db"
 
     monkeypatch.setenv("UAG_MGMT_SECRET", "unit-test-secret")
     monkeypatch.setattr(gateway_app.settings, "secret_key", "unit-test-secret")
     monkeypatch.setattr(gateway_app.settings, "release_check_enabled", True)
-    monkeypatch.setattr(gateway_app.settings, "release_repository", "codara/codara")
+    monkeypatch.setattr(gateway_app.settings, "release_repository", "amesh/amesh")
     monkeypatch.setattr(gateway_app.settings, "release_api_base_url", "https://api.github.test")
     monkeypatch.setattr(gateway_app.settings, "release_check_timeout_seconds", 1)
     gateway_app.clear_auth_caches()
@@ -102,9 +102,9 @@ def test_management_version_endpoint_can_check_updates(tmp_path, monkeypatch):
                 "latest_version": "1.1.0",
                 "update_available": True,
                 "status": "ok",
-                "repository": "codara/codara",
+                "repository": "amesh/amesh",
                 "release_url": "https://github.test/release",
-                "checked_url": "https://api.github.test/repos/codara/codara/releases/latest",
+                "checked_url": "https://api.github.test/repos/amesh/amesh/releases/latest",
                 "error": None,
             }
 
